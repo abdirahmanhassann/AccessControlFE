@@ -1,0 +1,36 @@
+{
+  "url": "http://127.0.0.1:8080/",
+  "viewports": {
+    "desktop": {
+      "width": 1280,
+      "height": 800,
+      "status": 200,
+      "title": "SiteGate",
+      "hasCanvas": false,
+      "bodyTextLen": 902,
+      "bodyTextHash": "12436b6d4ee732dc13d0d55794cae585708a1584bc14703a23e80d9f2c7a9d41",
+      "bodyTextPrefix": "SITEGATE Manager console Scan a room QR CONSTRUCTION SITE ACCESS",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview.png"
+    },
+    "mobile": {
+      "width": 390,
+      "height": 844,
+      "status": 200,
+      "title": "SiteGate",
+      "hasCanvas": false,
+      "bodyTextLen": 902,
+      "bodyTextHash": "12436b6d4ee732dc13d0d55794cae585708a1584bc14703a23e80d9f2c7a9d41",
+      "bodyTextPrefix": "SITEGATE Manager console Scan a room QR CONSTRUCTION SITE ACCESS",
+      "horizontalOverflow": false,
+      "consoleErrors": [],
+      "pageErrors": [],
+      "screenshot": "/workspace/screenshots/app-builder-preview-mobile.png"
+    }
+  },
+  "brandWarnings": [],
+  "authWarnings": [],
+  "verdictFile": "/workspace/screenshots/app-builder-preview.json"
+}

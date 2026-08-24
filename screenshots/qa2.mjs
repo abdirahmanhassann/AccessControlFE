@@ -1,0 +1,42 @@
+import { chromium } from "playwright";
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+page.on("console", (m) => { if (m.type() === "error") console.log("CONSOLE", m.text()); });
+page.on("pageerror", (e) => console.log("PAGEERROR", e.message));
+
+await page.goto("http://127.0.0.1:8080/login", { waitUntil: "networkidle" });
+await page.getByRole("button", { name: /Reset demo data/ }).click();
+await page.getByRole("button", { name: /Enter console/ }).click();
+await page.waitForURL("**/app");
+await page.waitForTimeout(1200);
+await page.screenshot({ path: "/workspace/screenshots/overview-v2.png" });
+const stats = await page.locator(".sg-stat .n").allInnerTexts();
+console.log("stats", stats);
+const items = await page.locator(".sg-list-item strong").allInnerTexts();
+console.log("cards", items);
+
+await page.locator(".sg-list-item").first().click();
+await page.waitForTimeout(700);
+console.log("url", page.url());
+console.log("approve count", await page.getByText("Approve", { exact: true }).count());
+await page.getByText("Approve", { exact: true }).click();
+await page.waitForTimeout(1000);
+await page.screenshot({ path: "/workspace/screenshots/approved-v2.png" });
+const badge = await page.locator(".sg-badge").first().innerText();
+console.log("badge", badge);
+
+await page.goto("http://127.0.0.1:8080/worker");
+await page.waitForTimeout(400);
+await page.locator(".sg-room-pick").filter({ hasText: "GF-12" }).click();
+await page.waitForTimeout(700);
+await page.locator('input[type="tel"]').fill("07700900123");
+await page.getByRole("button", { name: /Send SMS code/ }).click();
+await page.waitForTimeout(700);
+const otp = (await page.locator(".sg-otp").innerText()).replace(/\s/g, "");
+await page.locator(".sg-otp-input").fill(otp);
+await page.getByRole("button", { name: /^Verify$/ }).click();
+await page.waitForTimeout(1200);
+const h1 = await page.locator("h1").innerText();
+console.log("tom flow h1", h1);
+await page.screenshot({ path: "/workspace/screenshots/tom-clockout.png" });
+await browser.close();
