@@ -295,7 +295,7 @@ function OtpStep() {
       const token = session?.token ?? result.token;
       if (token) {
         const requests = await api.getAccessRequests(token);
-        const roomId = flow.room?.id;
+        const roomId = Number(flow.room?.id ?? (flow.room as { roomId?: number } | null)?.roomId ?? 0);
         const active = requests.find(
           (r) => r.roomId === roomId && (r.status === "Pending" || r.status === "Approved"),
         );
@@ -365,7 +365,11 @@ function FormStep() {
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!flow.room) return;
+    const roomId = Number(flow.room?.id ?? (flow.room as { roomId?: number } | null)?.roomId ?? 0);
+    if (!flow.room || !roomId) {
+      setError("Room is missing. Go back and scan the QR again.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -392,7 +396,7 @@ function FormStep() {
       const request = await api.insertAccessRequest({
         phoneNumber: flow.phoneNumber,
         workerId: worker.id,
-        roomId: flow.room.id,
+        roomId,
         reason: form.reason,
         workType: form.workType,
         description: form.description,

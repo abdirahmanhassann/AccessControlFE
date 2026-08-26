@@ -76,6 +76,11 @@ function camelize(value: unknown): unknown {
   if (out.requestedAt != null && out.createdAt == null) out.createdAt = out.requestedAt;
   if (out.reviewedAt != null && out.createdAt == null) out.createdAt = out.reviewedAt;
   if (out.roomName != null && out.name == null) out.name = out.roomName;
+  const looksLikeRoom =
+    out.id == null &&
+    out.roomId != null &&
+    (out.roomNumber != null || out.qrCodeIdentifier != null || out.workAreaId != null);
+  if (looksLikeRoom) out.id = out.roomId;
   return out;
 }
 
@@ -167,6 +172,33 @@ async function post<T>(path: string, body: unknown): Promise<T> {
   }
   const data = camelize(await parseBody(res));
   return data as T;
+}
+
+function num(value: unknown, fallback = 0): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function asRoom(data: unknown): ScanQrResult {
+  let row: Record<string, unknown> = {};
+  if (Array.isArray(data) && isPlainObject(data[0])) row = data[0];
+  else if (isPlainObject(data)) {
+    row = isPlainObject(data.room) ? { ...data, ...data.room } : data;
+  }
+  const id = num(row.id ?? row.roomId);
+  return {
+    id,
+    workAreaId: num(row.workAreaId),
+    roomNumber: String(row.roomNumber ?? row.number ?? ""),
+    name: String(row.name ?? row.roomName ?? ""),
+    qrCodeIdentifier: String(row.qrCodeIdentifier ?? row.qr ?? ""),
+    description: String(row.description ?? ""),
+    isActive: row.isActive !== false,
+    workAreaName: String(row.workAreaName ?? ""),
+    siteName: String(row.siteName ?? ""),
+    siteId: num(row.siteId),
+    siteAddress: String(row.siteAddress ?? ""),
+  };
 }
 
 function placeholderUser(email: string): User {
@@ -282,8 +314,8 @@ export const api = {
     return { token, user: user ?? placeholderUser(req.email) };
   },
   signup: (req: CreateUserRequest) => post<unknown>("/Access/signup", req),
-  scanQr: (qrCodeIdentifier: string) =>
-    post<ScanQrResult>("/Access/scanqr", { qrCodeIdentifier }),
+  scanQr: async (qrCodeIdentifier: string) =>
+    asRoom(await post<unknown>("/Access/scanqr", { qrCodeIdentifier })),
 
   getSites: (token: string) => post<Site[]>("/Access/getsites", { token }).then(asArray<Site>),
   insertSite: (token: string, data: Omit<Site, "id" | "isActive">) =>
@@ -320,7 +352,8 @@ export const api = {
   updateWorker: (token: string, data: Worker) =>
     post<Worker | null>("/Access/updateworker", { token, ...data }),
 
-  getRooms: (token: string) => post<Room[]>("/Access/getrooms", { token }).then(asArray<Room>),
+  getRooms: async (token: string) =>
+    asArray<unknown>(await post("/Access/getrooms", { token })).map((row) => asRoom(row)),
   insertRoom: (
     token: string,
     data: { workAreaId: number; roomNumber: string; name: string; description: string },
@@ -343,7 +376,27 @@ export const api = {
     reason: string;
     workType: string;
     description: string;
-  }) => asRequest(await post<unknown>("/Access/insertaccessrequest", data), data),
+  }) => {
+    const roomId = num(data.roomId);
+    const workerId = num(data.workerId);
+    if (!roomId) {
+      throw new ApiError(400, "Room id is missing. Scan the room QR again.");
+    }
+    const payload = {
+      phoneNumber: data.phoneNumber,
+      workerId,
+      roomId,
+      RoomId: roomId,
+      reason: data.reason,
+      workType: data.workType,
+      description: data.description,
+    };
+    return asRequest(await post<unknown>("/Access/insertaccessrequest", payload), {
+      ...data,
+      roomId,
+      workerId,
+    });
+  },
   updateAccessRequest: (token: string, data: Partial<AccessRequest> & { id: number }) =>
     post<AccessRequest | null>("/Access/updateaccessrequest", { token, ...data }),
 

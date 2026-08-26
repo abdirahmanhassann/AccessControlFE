@@ -20,7 +20,7 @@
  * `process.env`, which is why the merge has to happen before Vite starts.
  */
 import { spawn } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { constants as osConstants } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -104,6 +104,27 @@ export function isMainModule(moduleUrl) {
   }
 }
 
+function resolveInvocation(command, args) {
+  const root = projectRoot();
+  if (command === "vite") {
+    const viteJs = join(root, "node_modules", "vite", "bin", "vite.js");
+    if (existsSync(viteJs)) {
+      return { file: process.execPath, argv: [viteJs, ...args], shell: false };
+    }
+  }
+  const isWin = process.platform === "win32";
+  const looksPathed = command.includes("/") || command.includes("\\") || /\.(exe|cmd|bat|js|mjs)$/i.test(command);
+  if (!looksPathed) {
+    if (isWin) {
+      const cmdPath = join(root, "node_modules", ".bin", `${command}.cmd`);
+      if (existsSync(cmdPath)) return { file: cmdPath, argv: args, shell: true };
+    }
+    const unixBin = join(root, "node_modules", ".bin", command);
+    if (existsSync(unixBin)) return { file: unixBin, argv: args, shell: false };
+  }
+  return { file: command, argv: args, shell: isWin };
+}
+
 function main(argv) {
   const [command, ...args] = argv;
   if (!command) {
@@ -111,9 +132,15 @@ function main(argv) {
     process.exit(2);
   }
   const env = mergeAppEnv(readAppEnv(projectRoot()), process.env);
-  const child = spawn(command, args, { stdio: "inherit", env });
-  // The dev server is long-running and is stopped by signalling this wrapper.
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+  const { file, argv: childArgs, shell } = resolveInvocation(command, args);
+  const child = spawn(file, childArgs, {
+    stdio: "inherit",
+    env,
+    shell,
+    windowsHide: true,
+  });
+  const signals = process.platform === "win32" ? ["SIGINT", "SIGTERM"] : ["SIGINT", "SIGTERM", "SIGHUP"];
+  for (const signal of signals) {
     process.on(signal, () => child.kill(signal));
   }
   child.on("error", (err) => {
