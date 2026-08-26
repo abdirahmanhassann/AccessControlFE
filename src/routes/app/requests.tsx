@@ -1,8 +1,9 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Input, PageSkeleton, Select } from "@/components/ui";
+import { ApprovalActions } from "@/components/ApprovalActions";
 import { readSession } from "@/lib/session";
-import { roomLabel, useStaffData, workerLabel, effectiveStatus } from "@/lib/staff-data";
+import { latestApproval, roomLabel, useStaffData, workerLabel, effectiveStatus } from "@/lib/staff-data";
 import { statusTone, when } from "@/lib/format";
 import { useMounted } from "@/lib/use-mounted";
 
@@ -14,7 +15,7 @@ function RequestsPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
   useEffect(() => setToken(readSession()?.token), []);
-  const { data, error, loading } = useStaffData(token);
+  const { data, error, loading, reload } = useStaffData(token);
 
   const rows = useMemo(() => {
     if (!data) return [];
@@ -39,6 +40,7 @@ function RequestsPage() {
           <option>Pending</option>
           <option>Approved</option>
           <option>Rejected</option>
+          <option>Cancelled</option>
           <option>Completed</option>
         </Select>
       </div>
@@ -51,26 +53,34 @@ function RequestsPage() {
               <th>Trade</th>
               <th>Status</th>
               <th>Opened</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => {
               const st = effectiveStatus(r, data.approvals);
-              const approval = data.approvals.find((a) => a.accessRequestId === r.id);
+              const approval = latestApproval(data, r.id);
               return (
-              <tr key={r.id}>
-                <td>
-                  <Link to="/app/requests/$id" params={{ id: String(r.id) }}>
-                    {workerLabel(data, r.workerId, approval || r)}
-                  </Link>
-                </td>
-                <td>{roomLabel(data, r.roomId)}</td>
-                <td>{r.workType}</td>
-                <td>
-                  <Badge tone={statusTone(st)}>{st}</Badge>
-                </td>
-                <td className="sg-mono">{when(r.createdAt)}</td>
-              </tr>
+                <tr key={r.id}>
+                  <td>
+                    <Link to="/app/requests/$id" params={{ id: String(r.id) }}>
+                      {workerLabel(data, r.workerId, approval || r)}
+                    </Link>
+                  </td>
+                  <td>{roomLabel(data, r.roomId)}</td>
+                  <td>{r.workType}</td>
+                  <td>
+                    <Badge tone={statusTone(st)}>{st}</Badge>
+                  </td>
+                  <td className="sg-mono">{when(r.createdAt)}</td>
+                  <td>
+                    {approval?.id ? (
+                      <ApprovalActions approvalId={approval.id} onDone={reload} />
+                    ) : (
+                      <span className="sg-help">No approval row</span>
+                    )}
+                  </td>
+                </tr>
               );
             })}
           </tbody>

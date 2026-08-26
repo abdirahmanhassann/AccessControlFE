@@ -25,6 +25,11 @@ export function when(iso?: string | null) {
   return formatDistanceToNow(d, { addSuffix: true });
 }
 
+export function whenReviewed(iso?: string | null) {
+  if (!iso) return "Not reviewed";
+  return when(iso);
+}
+
 export function whenExact(iso?: string | null) {
   if (!iso) return "—";
   const d = parseISO(iso);

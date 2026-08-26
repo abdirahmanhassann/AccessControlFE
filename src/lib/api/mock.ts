@@ -1158,10 +1158,24 @@ const handlers: Record<string, (body: Body) => unknown> = {
     const db = load();
     const row = db.approvals.find((a) => a.id === Number(body.id));
     if (!row) throw new ApiError(404, "Approval not found.");
-    row.accessRequestId = Number(body.accessRequestId ?? row.accessRequestId);
-    row.approverUserId = Number(body.approverUserId ?? row.approverUserId);
     row.status = String(body.status ?? row.status);
-    row.comment = String(body.comment ?? row.comment);
+    if ("comment" in body) row.comment = String(body.comment ?? "");
+    row.reviewedAt =
+      body.reviewedAt != null && String(body.reviewedAt) ? String(body.reviewedAt) : iso();
+    const req = db.requests.find((r) => r.id === row.accessRequestId);
+    if (req) {
+      const status = String(row.status);
+      if (status === "Approved") {
+        req.status = "Approved";
+        req.approvedAt = row.reviewedAt ?? iso();
+        req.clockedInAt = req.clockedInAt ?? iso();
+      } else if (status === "Rejected") {
+        req.status = "Rejected";
+        req.rejectedAt = row.reviewedAt ?? iso();
+      } else if (status === "Cancelled") {
+        req.status = "Cancelled";
+      }
+    }
     persist();
     return row;
   },

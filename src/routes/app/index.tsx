@@ -1,17 +1,18 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Badge, PageSkeleton } from "@/components/ui";
+import { ApprovalActions } from "@/components/ApprovalActions";
 import { readSession } from "@/lib/session";
 import {
   approvalApproverName,
-  approvalWorkerName,
   effectiveStatus,
   pendingRequests,
   roomLabel,
   useStaffData,
+  workerForApproval,
   workerLabel,
 } from "@/lib/staff-data";
-import { prettyPhone, statusTone, when } from "@/lib/format";
+import { statusTone, when, whenReviewed } from "@/lib/format";
 import { useMounted } from "@/lib/use-mounted";
 
 export const Route = createFileRoute("/app/")({ component: Overview });
@@ -20,14 +21,17 @@ function Overview() {
   const mounted = useMounted();
   const [token, setToken] = useState<string>();
   useEffect(() => setToken(readSession()?.token), []);
-  const { data, error, loading } = useStaffData(token);
+  const { data, error, loading, reload } = useStaffData(token);
 
   if (!mounted || loading || !data) return <PageSkeleton />;
 
   const pending = pendingRequests(data);
-  const approvals = [...data.approvals].sort((a, b) =>
-    String(b.reviewedAt || b.createdAt).localeCompare(String(a.reviewedAt || a.createdAt)),
-  );
+  const approvals = [...data.approvals].sort((a, b) => {
+    const ar = a.reviewedAt ? 1 : 0;
+    const br = b.reviewedAt ? 1 : 0;
+    if (ar !== br) return ar - br;
+    return String(b.reviewedAt || "").localeCompare(String(a.reviewedAt || ""));
+  });
   const approved = approvals.filter((a) => /^approved$/i.test(String(a.status)));
   const rejected = approvals.filter((a) => /^rejected$/i.test(String(a.status)));
   const onSite = data.requests.filter((r) => {
@@ -59,7 +63,7 @@ function Overview() {
       <div className="sg-split">
         <section className="sg-card">
           <h2>Needs a decision</h2>
-          <p className="sg-muted">Open access requests that do not yet have an approval.</p>
+          <p className="sg-muted">Open access requests waiting on a manager.</p>
           <div className="sg-list" style={{ marginTop: 14 }}>
             {pending.length === 0 ? (
               <p className="sg-muted">No pending worker requests.</p>
@@ -99,41 +103,49 @@ function Overview() {
       </div>
       <section className="sg-card">
         <h2>Access request approvals</h2>
-        <p className="sg-muted">From AccessRequestApprovals — worker is the contractor, approver is staff.</p>
+        <p className="sg-muted">
+          Approve, reject or cancel updates AccessRequestApprovals. ReviewedAt stays empty until you decide.
+        </p>
         <div className="sg-table-wrap" style={{ marginTop: 12 }}>
           <table className="sg-table">
             <thead>
               <tr>
                 <th>Worker</th>
-                <th>Phone</th>
                 <th>Approver</th>
                 <th>Status</th>
                 <th>Reviewed</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
-              {approvals.map((a) => (
-                <tr key={a.id}>
-                  <td>
-                    <Link to="/app/requests/$id" params={{ id: String(a.accessRequestId) }}>
-                      {approvalWorkerName(a) || workerLabel(data, 0, a)}
-                    </Link>
-                  </td>
-                  <td className="sg-mono">{a.workerPhoneNumber ? prettyPhone(a.workerPhoneNumber) : "—"}</td>
-                  <td>
-                    {approvalApproverName(a) || "—"}
-                    {a.approverEmail ? <div className="sg-muted">{a.approverEmail}</div> : null}
-                  </td>
-                  <td>
-                    <Badge tone={statusTone(String(a.status))}>{a.status}</Badge>
-                  </td>
-                  <td className="sg-mono">{when(a.reviewedAt || a.createdAt)}</td>
-                </tr>
-              ))}
+              {approvals.map((a) => {
+                const req = data.requests.find((r) => r.id === a.accessRequestId);
+                return (
+                  <tr key={a.id}>
+                    <td>
+                      <Link to="/app/requests/$id" params={{ id: String(a.accessRequestId) }}>
+                        {workerForApproval(data, a)}
+                      </Link>
+                      {req ? <div className="sg-muted">{roomLabel(data, req.roomId)}</div> : null}
+                    </td>
+                    <td>
+                      {approvalApproverName(a) || "—"}
+                      {a.approverEmail ? <div className="sg-muted">{a.approverEmail}</div> : null}
+                    </td>
+                    <td>
+                      <Badge tone={statusTone(String(a.status))}>{a.status}</Badge>
+                    </td>
+                    <td className="sg-mono">{whenReviewed(a.reviewedAt)}</td>
+                    <td>
+                      <ApprovalActions approvalId={a.id} onDone={reload} />
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {approvals.length === 0 ? (
-            <p className="sg-empty">No approval rows yet. Approve or reject a worker request to create one.</p>
+            <p className="sg-empty">No approval rows yet.</p>
           ) : null}
         </div>
       </section>

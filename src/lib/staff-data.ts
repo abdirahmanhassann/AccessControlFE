@@ -162,10 +162,21 @@ export function effectiveStatus(req: AccessRequest, approvals: AccessRequestAppr
   const mine = approvals
     .filter((a) => a.accessRequestId === req.id)
     .sort((a, b) => String(b.reviewedAt || b.createdAt).localeCompare(String(a.reviewedAt || a.createdAt)));
-  const decided = mine.find((a) => /^(approved|rejected)$/i.test(String(a.status)));
+  const decided = mine.find((a) => /^(approved|rejected|cancelled)$/i.test(String(a.status)));
   if (decided) return decided.status;
   if (req.status && !/^pending$/i.test(String(req.status))) return req.status;
   return mine[0]?.status || req.status || "Pending";
+}
+
+export function workerForApproval(data: StaffData | null, approval: AccessRequestApproval) {
+  const req = data?.requests.find((r) => r.id === approval.accessRequestId);
+  if (req) return workerLabel(data, req.workerId, req);
+  return approvalWorkerName(approval) || `Request #${approval.accessRequestId}`;
+}
+
+export function isUnreviewed(a: AccessRequestApproval) {
+  if (/^(approved|rejected|cancelled)$/i.test(String(a.status)) && a.reviewedAt) return false;
+  return true;
 }
 
 export function pendingRequests(data: StaffData | null) {

@@ -30,37 +30,28 @@ function RequestDetail() {
   const { data, loading, reload, error } = useStaffData(token);
   const req = data?.requests.find((r) => r.id === Number(id));
 
-  async function decide(status: "Approved" | "Rejected") {
+  async function decide(status: "Approved" | "Rejected" | "Cancelled") {
     const session = readSession();
     if (!session || !req || !data) return;
-    const approverUserId =
-      session.user.id ||
-      data.users.find((u) => u.email?.toLowerCase() === session.user.email.toLowerCase())?.id ||
-      0;
-    if (!approverUserId) {
-      toast("Your staff user id is missing. Sign in again.");
+    const existing =
+      data.approvals.find((a) => a.accessRequestId === req.id && /^pending$/i.test(String(a.status))) ||
+      latestApproval(data, req.id);
+    if (!existing?.id) {
+      toast("No AccessRequestApprovals row to update for this request.");
       return;
     }
     setBusy(true);
     try {
-      const existing = data.approvals.find(
-        (a) => a.accessRequestId === req.id && /^pending$/i.test(String(a.status)),
-      );
-      const payload = {
-        accessRequestId: req.id,
-        approverUserId,
+      await api.updateApproval(session.token, {
+        id: existing.id,
         status,
         comment,
-      };
-      if (existing?.id) {
-        await api.updateApproval(session.token, { ...payload, id: existing.id });
-      } else {
-        await api.insertApproval(session.token, payload);
-      }
-      toast(status === "Approved" ? "Approval saved — worker can enter" : "Rejection saved — worker notified");
+        reviewedAt: new Date().toISOString(),
+      });
+      toast(status === "Approved" ? "Approved" : status === "Rejected" ? "Rejected" : "Cancelled");
       await reload();
     } catch (err) {
-      toast(err instanceof ApiError ? err.message : "Could not save decision");
+      toast(err instanceof ApiError ? err.message : "Could not update approval");
     } finally {
       setBusy(false);
     }
@@ -141,10 +132,10 @@ function RequestDetail() {
           ) : null}
         </section>
         <aside style={{ display: "grid", gap: 16 }}>
-          {/^pending$/i.test(status) ? (
+          {latest?.id ? (
             <section className="sg-card" style={{ display: "grid", gap: 12 }}>
               <h2>Decision</h2>
-              <p className="sg-muted">Writes an AccessRequestApproval as this staff user — not as the worker.</p>
+              <p className="sg-muted">Calls AccessRequestApprovalsUpdate with this row's Id and ReviewedAt.</p>
               <Field label="Comment to the worker">
                 <Textarea value={comment} onChange={(e) => setComment(e.target.value)} />
               </Field>
@@ -155,9 +146,16 @@ function RequestDetail() {
                 <Button variant="danger" disabled={busy} onClick={() => void decide("Rejected")}>
                   Reject
                 </Button>
+                <Button disabled={busy} onClick={() => void decide("Cancelled")}>
+                  Cancel
+                </Button>
               </div>
             </section>
-          ) : null}
+          ) : (
+            <section className="sg-card">
+              <p className="sg-muted">No AccessRequestApprovals row exists for this request, so it cannot be updated.</p>
+            </section>
+          )}
           <section className="sg-card" style={{ display: "grid", gap: 12 }}>
             <h2>Approvals</h2>
             {approvals.length === 0 ? <p className="sg-muted">None yet.</p> : null}
@@ -167,7 +165,7 @@ function RequestDetail() {
                 <p>
                   {approvalApproverName(a) || userLabel(data, a.approverUserId, a)}
                   {" · "}
-                  {whenExact(a.reviewedAt || a.createdAt)}
+                  {whenExact(a.reviewedAt)}
                 </p>
                 {a.approverEmail ? <p className="sg-muted">{a.approverEmail}</p> : null}
                 {a.comment ? <p className="sg-muted">{a.comment}</p> : null}

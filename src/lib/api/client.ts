@@ -311,22 +311,30 @@ function asRequestRow(data: unknown): AccessRequest {
 
 function asApproval(data: unknown): AccessRequestApproval {
   const row = coerceRow(data);
-  const reviewedAt = pickStr(row, ["reviewedAt", "createdAt"]) || null;
+  const reviewedAt = pickDate(row, ["reviewedAt"]);
   return {
     id: pickNum(row, ["id"]),
     accessRequestId: pickNum(row, ["accessRequestId"]),
     approverUserId: pickNum(row, ["approverUserId"]),
     status: pickStr(row, ["status"]) || "Pending",
     comment: pickStr(row, ["comment"]),
-    createdAt: reviewedAt || new Date().toISOString(),
+    createdAt: pickStr(row, ["createdAt"]) || reviewedAt || "",
     reviewedAt,
-    approverFirstName: pickStr(row, ["approverFirstName"]),
-    approverLastName: pickStr(row, ["approverLastName"]),
-    approverEmail: pickStr(row, ["approverEmail"]),
+    approverFirstName: pickStr(row, ["approverFirstName", "firstName"]),
+    approverLastName: pickStr(row, ["approverLastName", "lastName"]),
+    approverEmail: pickStr(row, ["approverEmail", "email"]),
     workerFirstName: pickStr(row, ["workerFirstName"]),
     workerLastName: pickStr(row, ["workerLastName"]),
     workerPhoneNumber: pickStr(row, ["workerPhoneNumber"]),
   };
+}
+
+function pickDate(row: Record<string, unknown>, names: string[]): string | null {
+  const s = pickStr(row, names);
+  if (!s) return null;
+  const t = Date.parse(s);
+  if (!Number.isFinite(t) || t < Date.parse("2000-01-01T00:00:00Z")) return null;
+  return s;
 }
 
 function allFilterBody(token: string) {
@@ -612,17 +620,16 @@ export const api = {
     ),
   updateApproval: (
     token: string,
-    data: Partial<AccessRequestApproval> & { id: number; accessRequestId: number },
+    data: { id: number; status: string; comment?: string | null; reviewedAt?: string | null },
   ) =>
     post<AccessRequestApproval | null>(
       "/Access/updateaccessrequestapproval",
       dual({
         token,
         id: data.id,
-        accessRequestId: data.accessRequestId,
-        approverUserId: data.approverUserId,
         status: data.status,
-        comment: data.comment ?? "",
+        comment: data.comment ?? null,
+        reviewedAt: data.reviewedAt ?? null,
       }),
     ),
 
