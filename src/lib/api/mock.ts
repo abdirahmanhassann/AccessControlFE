@@ -1072,7 +1072,24 @@ const handlers: Record<string, (body: Body) => unknown> = {
 
   "/Access/getaccessrequestapprovals": (body) => {
     requireStaff(body as { token?: string });
-    return load().approvals;
+    const db = load();
+    return db.approvals
+      .map((a) => {
+        const req = db.requests.find((r) => r.id === a.accessRequestId);
+        const worker = req ? db.workers.find((w) => w.id === req.workerId) : undefined;
+        const approver = db.users.find((u) => u.id === a.approverUserId);
+        return {
+          ...a,
+          reviewedAt: a.reviewedAt ?? a.createdAt,
+          approverFirstName: approver?.firstName ?? "",
+          approverLastName: approver?.lastName ?? "",
+          approverEmail: approver?.email ?? "",
+          workerFirstName: worker?.firstName ?? "",
+          workerLastName: worker?.lastName ?? "",
+          workerPhoneNumber: worker?.phoneNumber ?? "",
+        };
+      })
+      .sort((a, b) => String(b.reviewedAt || b.createdAt).localeCompare(String(a.reviewedAt || a.createdAt)));
   },
   "/Access/insertaccessrequestapproval": (body) => {
     const session = requireStaff(body as { token?: string });
@@ -1087,6 +1104,7 @@ const handlers: Record<string, (body: Body) => unknown> = {
       status,
       comment: String(body.comment ?? ""),
       createdAt: iso(),
+      reviewedAt: iso(),
     };
     db.approvals.unshift(row);
     const worker = db.workers.find((w) => w.id === req.workerId);

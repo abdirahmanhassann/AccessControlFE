@@ -90,6 +90,9 @@ export type AccessRequest = {
   clockedOutAt: string | null;
   completedAt: string | null;
   createdAt: string;
+  workerFirstName?: string;
+  workerLastName?: string;
+  workerPhoneNumber?: string;
 };
 
 export type AccessRequestApproval = {
@@ -99,6 +102,13 @@ export type AccessRequestApproval = {
   status: ApprovalStatus | string;
   comment: string;
   createdAt: string;
+  reviewedAt?: string | null;
+  approverFirstName?: string;
+  approverLastName?: string;
+  approverEmail?: string;
+  workerFirstName?: string;
+  workerLastName?: string;
+  workerPhoneNumber?: string;
 };
 
 export type AccessPhoto = {

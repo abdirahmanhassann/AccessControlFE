@@ -253,6 +253,95 @@ function asRoom(data: unknown): ScanQrResult {
   };
 }
 
+function asUserRow(data: unknown): User {
+  const row = coerceRow(data);
+  return {
+    id: pickNum(row, ["id", "userId"]),
+    firstName: pickStr(row, ["firstName"]),
+    lastName: pickStr(row, ["lastName"]),
+    email: pickStr(row, ["email"]),
+    phoneNumber: pickStr(row, ["phoneNumber"]),
+    role: pickStr(row, ["role"]) || "Manager",
+    isActive: row.isActive !== false && row.IsActive !== false,
+    createdAt: pickStr(row, ["createdAt"]) || new Date().toISOString(),
+  };
+}
+
+function asWorkerRow(
+  data: unknown,
+  fallback?: { firstName?: string; lastName?: string; phoneNumber?: string; companyName?: string },
+): Worker {
+  const row = coerceRow(data);
+  const id = typeof data === "number" ? data : pickNum(row, ["id", "workerId"]);
+  return {
+    id,
+    firstName: pickStr(row, ["firstName"]) || fallback?.firstName || "",
+    lastName: pickStr(row, ["lastName"]) || fallback?.lastName || "",
+    phoneNumber: pickStr(row, ["phoneNumber"]) || fallback?.phoneNumber || "",
+    companyName: pickStr(row, ["companyName"]) || fallback?.companyName || "",
+    isActive: row.isActive !== false && row.IsActive !== false,
+    createdAt: pickStr(row, ["createdAt"]) || new Date().toISOString(),
+  };
+}
+
+function asRequestRow(data: unknown): AccessRequest {
+  const row = coerceRow(data);
+  const status = pickStr(row, ["status"]) || "Pending";
+  return {
+    id: pickNum(row, ["id"]),
+    workerId: pickNum(row, ["workerId"]),
+    roomId: pickNum(row, ["roomId"]),
+    status,
+    reason: pickStr(row, ["reason"]),
+    workType: pickStr(row, ["workType"]),
+    description: pickStr(row, ["description"]),
+    phoneNumber: pickStr(row, ["phoneNumber", "workerPhoneNumber"]),
+    approvedAt: pickStr(row, ["approvedAt"]) || null,
+    rejectedAt: pickStr(row, ["rejectedAt"]) || null,
+    clockedInAt: pickStr(row, ["clockedInAt"]) || null,
+    expectedClockOutAt: pickStr(row, ["expectedClockOutAt"]) || null,
+    clockedOutAt: pickStr(row, ["clockedOutAt"]) || null,
+    completedAt: pickStr(row, ["completedAt"]) || null,
+    createdAt: pickStr(row, ["createdAt", "requestedAt"]) || new Date().toISOString(),
+    workerFirstName: pickStr(row, ["workerFirstName"]),
+    workerLastName: pickStr(row, ["workerLastName"]),
+    workerPhoneNumber: pickStr(row, ["workerPhoneNumber"]),
+  };
+}
+
+function asApproval(data: unknown): AccessRequestApproval {
+  const row = coerceRow(data);
+  const reviewedAt = pickStr(row, ["reviewedAt", "createdAt"]) || null;
+  return {
+    id: pickNum(row, ["id"]),
+    accessRequestId: pickNum(row, ["accessRequestId"]),
+    approverUserId: pickNum(row, ["approverUserId"]),
+    status: pickStr(row, ["status"]) || "Pending",
+    comment: pickStr(row, ["comment"]),
+    createdAt: reviewedAt || new Date().toISOString(),
+    reviewedAt,
+    approverFirstName: pickStr(row, ["approverFirstName"]),
+    approverLastName: pickStr(row, ["approverLastName"]),
+    approverEmail: pickStr(row, ["approverEmail"]),
+    workerFirstName: pickStr(row, ["workerFirstName"]),
+    workerLastName: pickStr(row, ["workerLastName"]),
+    workerPhoneNumber: pickStr(row, ["workerPhoneNumber"]),
+  };
+}
+
+function allFilterBody(token: string) {
+  return { token };
+}
+
+function dual(payload: Record<string, unknown>) {
+  const out: Record<string, unknown> = { ...payload };
+  for (const [key, value] of Object.entries(payload)) {
+    if (!key || key[0] !== key[0].toLowerCase()) continue;
+    out[key.charAt(0).toUpperCase() + key.slice(1)] = value;
+  }
+  return out;
+}
+
 async function resolveRoom(qrCodeIdentifier: string, raw: unknown): Promise<ScanQrResult> {
   const room = asRoom(raw);
   if (!room.qrCodeIdentifier) room.qrCodeIdentifier = qrCodeIdentifier;
@@ -380,7 +469,9 @@ export const api = {
     if (!token) throw new ApiError(401, "Login did not return a token.");
     let user: User | undefined;
     try {
-      const users = asArray<User>(await post("/Access/getusers", { token }));
+      const users = asArray<unknown>(await post("/Access/getusers", { token })).map((row) =>
+        asUserRow(row),
+      );
       user =
         users.find((u) => u.email?.toLowerCase() === req.email.toLowerCase()) ?? users[0];
     } catch {
@@ -413,7 +504,10 @@ export const api = {
   updateWorkArea: (token: string, data: WorkArea) =>
     post<WorkArea | null>("/Access/updateworkarea", { token, ...data }),
 
-  getUsers: (token: string) => post<User[]>("/Access/getusers", { token }).then(asArray<User>),
+  getUsers: async (token: string) =>
+    asArray<unknown>(await post("/Access/getusers", { token }))
+      .map((row) => asUserRow(row))
+      .filter((row) => row.id),
   insertUser: (token: string, data: Partial<User>) =>
     post<User | null>("/Access/insertuser", { token, ...data }),
   updateUser: (token: string, data: User) => post<User | null>("/Access/updateuser", { token, ...data }),
@@ -425,14 +519,16 @@ export const api = {
   updateWorkAreaManager: (token: string, data: WorkAreaManager) =>
     post<WorkAreaManager | null>("/Access/updateworkareamanager", { token, ...data }),
 
-  getWorkers: (token: string) =>
-    post<Worker[]>("/Access/getworkers", { token }).then(asArray<Worker>),
+  getWorkers: async (token: string) =>
+    asArray<unknown>(await post("/Access/getworkers", { token }))
+      .map((row) => asWorkerRow(row))
+      .filter((row) => row.id),
   insertWorker: async (data: {
     firstName?: string;
     lastName?: string;
     phoneNumber?: string;
     companyName?: string;
-  }) => asWorker(await post<unknown>("/Access/insertworker", data), data),
+  }) => asWorkerRow(await post<unknown>("/Access/insertworker", data), data),
   updateWorker: (token: string, data: Worker) =>
     post<Worker | null>("/Access/updateworker", { token, ...data }),
 
@@ -451,8 +547,10 @@ export const api = {
   updateAccessWindow: (token: string, data: AccessWindow) =>
     post<AccessWindow | null>("/Access/updateaccesswindow", { token, ...data }),
 
-  getAccessRequests: (token: string) =>
-    post<AccessRequest[]>("/Access/getaccessrequests", { token }).then(asArray<AccessRequest>),
+  getAccessRequests: async (token: string) =>
+    asArray<unknown>(await post("/Access/getaccessrequests", { token }))
+      .map((row) => asRequestRow(row))
+      .filter((row) => row.id),
   insertAccessRequest: async (data: {
     phoneNumber: string;
     workerId: number;
@@ -494,16 +592,39 @@ export const api = {
   updateAccessRequest: (token: string, data: Partial<AccessRequest> & { id: number }) =>
     post<AccessRequest | null>("/Access/updateaccessrequest", { token, ...data }),
 
-  getApprovals: (token: string) =>
-    post<AccessRequestApproval[]>("/Access/getaccessrequestapprovals", { token }).then(
-      asArray<AccessRequestApproval>,
-    ),
+  getApprovals: async (token: string) =>
+    asArray<unknown>(await post("/Access/getaccessrequestapprovals", allFilterBody(token)))
+      .map((row) => asApproval(row))
+      .filter((row) => row.id || row.accessRequestId),
   insertApproval: (
     token: string,
     data: { accessRequestId: number; approverUserId: number; status: string; comment: string },
-  ) => post<AccessRequestApproval | null>("/Access/insertaccessrequestapproval", { token, ...data }),
-  updateApproval: (token: string, data: Partial<AccessRequestApproval> & { accessRequestId: number }) =>
-    post<AccessRequestApproval | null>("/Access/updateaccessrequestapproval", { token, ...data }),
+  ) =>
+    post<AccessRequestApproval | null>(
+      "/Access/insertaccessrequestapproval",
+      dual({
+        token,
+        accessRequestId: data.accessRequestId,
+        approverUserId: data.approverUserId,
+        status: data.status,
+        comment: data.comment ?? "",
+      }),
+    ),
+  updateApproval: (
+    token: string,
+    data: Partial<AccessRequestApproval> & { id: number; accessRequestId: number },
+  ) =>
+    post<AccessRequestApproval | null>(
+      "/Access/updateaccessrequestapproval",
+      dual({
+        token,
+        id: data.id,
+        accessRequestId: data.accessRequestId,
+        approverUserId: data.approverUserId,
+        status: data.status,
+        comment: data.comment ?? "",
+      }),
+    ),
 
   getPhotos: (token: string) =>
     post<AccessPhoto[]>("/Access/getaccessphotos", { token }).then(asArray<AccessPhoto>),

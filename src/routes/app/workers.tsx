@@ -22,6 +22,9 @@ function WorkersPage() {
   return (
     <div className="sg-content">
       {error ? <p className="sg-error">{error}</p> : null}
+      <p className="sg-muted">
+        Workers are contractors in the Workers table. They request room access. They are not managers.
+      </p>
       <div className="sg-toolbar">
         <Button variant="primary" onClick={() => setEdit("new")}>
           Add worker

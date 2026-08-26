@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Input, PageSkeleton, Select } from "@/components/ui";
 import { readSession } from "@/lib/session";
-import { roomLabel, useStaffData, workerLabel } from "@/lib/staff-data";
+import { roomLabel, useStaffData, workerLabel, effectiveStatus } from "@/lib/staff-data";
 import { statusTone, when } from "@/lib/format";
 import { useMounted } from "@/lib/use-mounted";
 
@@ -19,8 +19,10 @@ function RequestsPage() {
   const rows = useMemo(() => {
     if (!data) return [];
     return data.requests.filter((r) => {
-      if (status !== "all" && r.status !== status) return false;
-      const hay = `${workerLabel(data, r.workerId)} ${roomLabel(data, r.roomId)} ${r.workType} ${r.reason}`.toLowerCase();
+      const st = effectiveStatus(r, data.approvals);
+      if (status !== "all" && st !== status) return false;
+      const approval = data.approvals.find((a) => a.accessRequestId === r.id);
+      const hay = `${workerLabel(data, r.workerId, approval || r)} ${roomLabel(data, r.roomId)} ${r.workType} ${r.reason}`.toLowerCase();
       return hay.includes(q.toLowerCase());
     });
   }, [data, q, status]);
@@ -52,21 +54,25 @@ function RequestsPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {rows.map((r) => {
+              const st = effectiveStatus(r, data.approvals);
+              const approval = data.approvals.find((a) => a.accessRequestId === r.id);
+              return (
               <tr key={r.id}>
                 <td>
                   <Link to="/app/requests/$id" params={{ id: String(r.id) }}>
-                    {workerLabel(data, r.workerId)}
+                    {workerLabel(data, r.workerId, approval || r)}
                   </Link>
                 </td>
                 <td>{roomLabel(data, r.roomId)}</td>
                 <td>{r.workType}</td>
                 <td>
-                  <Badge tone={statusTone(r.status)}>{r.status}</Badge>
+                  <Badge tone={statusTone(st)}>{st}</Badge>
                 </td>
                 <td className="sg-mono">{when(r.createdAt)}</td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         {rows.length === 0 ? <p className="sg-empty">No matching requests.</p> : null}

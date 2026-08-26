@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Badge, Button, Field, Input, Modal, PageSkeleton, Select, toast } from "@/components/ui";
 import { readSession } from "@/lib/session";
-import { areaLabel, useStaffData } from "@/lib/staff-data";
+import { areaLabel, isStaffRole, useStaffData } from "@/lib/staff-data";
 import { useMounted } from "@/lib/use-mounted";
 import { api } from "@/lib/api/client";
 import type { User } from "@/lib/api/types";
@@ -19,9 +19,15 @@ function StaffPage() {
 
   if (!mounted || loading || !data) return <PageSkeleton />;
 
+  const staff = data.users.filter((u) => isStaffRole(u.role));
+  const managers = staff.filter((u) => /manager|admin/i.test(String(u.role)));
+
   return (
     <div className="sg-content">
       {error ? <p className="sg-error">{error}</p> : null}
+      <p className="sg-muted">
+        Staff are Users (managers and admins) who approve access. Site contractors live under Workers.
+      </p>
       <div className="sg-toolbar">
         <Button variant="primary" onClick={() => setEdit("new")}>
           Add staff
@@ -39,7 +45,7 @@ function StaffPage() {
             </tr>
           </thead>
           <tbody>
-            {data.users.map((u) => (
+            {staff.map((u) => (
               <tr key={u.id} onClick={() => setEdit(u)}>
                 <td>
                   {u.firstName} {u.lastName}
@@ -94,7 +100,7 @@ function StaffPage() {
       ) : null}
       {assign ? (
         <AssignForm
-          users={data.users}
+          users={managers.length ? managers : staff}
           areas={data.areas}
           onClose={() => setAssign(false)}
           onSave={async (workAreaId, managerUserId, isPrimary) => {

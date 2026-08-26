@@ -126,14 +126,56 @@ export function roomLabel(data: StaffData | null, roomId: number) {
   return `${room.roomNumber} · ${room.name}${site ? ` · ${site.name}` : ""}`;
 }
 
-export function workerLabel(data: StaffData | null, workerId: number) {
+export function workerLabel(data: StaffData | null, workerId: number, fallback?: AccessRequest | AccessRequestApproval | null) {
   const w = data?.workers.find((x) => x.id === workerId);
-  return w ? `${w.firstName} ${w.lastName}` : `Worker #${workerId}`;
+  if (w) return `${w.firstName} ${w.lastName}`.trim();
+  const fromJoin = approvalWorkerName(fallback);
+  if (fromJoin) return fromJoin;
+  return workerId ? `Worker #${workerId}` : "Unknown worker";
 }
 
-export function userLabel(data: StaffData | null, userId: number) {
+export function userLabel(data: StaffData | null, userId: number, fallback?: AccessRequestApproval | null) {
   const u = data?.users.find((x) => x.id === userId);
-  return u ? `${u.firstName} ${u.lastName}` : `User #${userId}`;
+  if (u) return `${u.firstName} ${u.lastName}`.trim();
+  const fromJoin = approvalApproverName(fallback);
+  if (fromJoin) return fromJoin;
+  return userId ? `Staff #${userId}` : "Unknown staff";
+}
+
+export function approvalWorkerName(row?: AccessRequest | AccessRequestApproval | null) {
+  if (!row) return "";
+  return [row.workerFirstName, row.workerLastName].filter(Boolean).join(" ").trim();
+}
+
+export function approvalApproverName(row?: AccessRequestApproval | null) {
+  if (!row) return "";
+  return [row.approverFirstName, row.approverLastName].filter(Boolean).join(" ").trim();
+}
+
+export function latestApproval(data: StaffData | null, accessRequestId: number) {
+  return (data?.approvals ?? [])
+    .filter((a) => a.accessRequestId === accessRequestId)
+    .sort((a, b) => String(b.reviewedAt || b.createdAt).localeCompare(String(a.reviewedAt || a.createdAt)))[0];
+}
+
+export function effectiveStatus(req: AccessRequest, approvals: AccessRequestApproval[]) {
+  const mine = approvals
+    .filter((a) => a.accessRequestId === req.id)
+    .sort((a, b) => String(b.reviewedAt || b.createdAt).localeCompare(String(a.reviewedAt || a.createdAt)));
+  const decided = mine.find((a) => /^(approved|rejected)$/i.test(String(a.status)));
+  if (decided) return decided.status;
+  if (req.status && !/^pending$/i.test(String(req.status))) return req.status;
+  return mine[0]?.status || req.status || "Pending";
+}
+
+export function pendingRequests(data: StaffData | null) {
+  if (!data) return [];
+  return data.requests.filter((r) => /^pending$/i.test(effectiveStatus(r, data.approvals)));
+}
+
+export function isStaffRole(role?: string | null) {
+  const r = String(role ?? "").toLowerCase();
+  return r === "admin" || r === "sitemanager" || r === "manager" || r === "viewer";
 }
 
 export function areaLabel(data: StaffData | null, areaId: number) {

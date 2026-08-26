@@ -19,6 +19,7 @@ import { BrandMark, Button } from "@/components/ui";
 import { clearSession, readSession } from "@/lib/session";
 import { useMounted } from "@/lib/use-mounted";
 import { API_BASE, USE_MOCK, api } from "@/lib/api/client";
+import { effectiveStatus } from "@/lib/staff-data";
 import type { Session } from "@/lib/api/types";
 
 const NAV = [
@@ -52,7 +53,15 @@ export function ManagerShell({ children }: { children?: ReactNode }) {
     setSession(s);
     api
       .getAccessRequests(s.token)
-      .then((rows) => setPending(rows.filter((r) => r.status === "Pending").length))
+      .then(async (rows) => {
+        let approvals: Awaited<ReturnType<typeof api.getApprovals>> = [];
+        try {
+          approvals = await api.getApprovals(s.token);
+        } catch {
+          approvals = [];
+        }
+        setPending(rows.filter((r) => /^pending$/i.test(effectiveStatus(r, approvals))).length);
+      })
       .catch(() => {});
   }, [mounted, navigate, pathname]);
 
