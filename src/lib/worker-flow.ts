@@ -46,6 +46,6 @@ export const useWorkerFlow = create<WorkerFlow>()(
       startWithQr: (qr) => set({ ...empty, qrCodeIdentifier: qr, step: "scan" }),
       reset: () => set(empty),
     }),
-    { name: "sitegate.worker-flow" },
+    { name: "sitegate.worker-flow", version: 2 },
   ),
 );

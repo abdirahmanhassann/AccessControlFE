@@ -1,5 +1,6 @@
 import { ApiError } from "./types";
 import { mockHandle } from "./mock";
+import { readSession } from "@/lib/session";
 import type {
   AccessPhoto,
   AccessRequest,
@@ -67,6 +68,10 @@ function camelize(value: unknown): unknown {
   if (!isPlainObject(value)) return value;
   const span = formatTimeSpan(value);
   if (span) return span;
+
+  const tableRows = value.Table ?? value.table ?? value.Rows ?? value.rows;
+  if (Array.isArray(tableRows)) return camelize(tableRows);
+
   const out: Record<string, unknown> = {};
   for (const [key, nested] of Object.entries(value)) {
     if (SKIP_KEYS.has(key.toLowerCase())) continue;
@@ -78,9 +83,11 @@ function camelize(value: unknown): unknown {
   if (out.roomName != null && out.name == null) out.name = out.roomName;
   const looksLikeRoom =
     out.id == null &&
-    out.roomId != null &&
     (out.roomNumber != null || out.qrCodeIdentifier != null || out.workAreaId != null);
-  if (looksLikeRoom) out.id = out.roomId;
+  if (looksLikeRoom) {
+    const rid = pickNum(out, ["id", "roomId", "roomID"]);
+    if (rid) out.id = rid;
+  }
   return out;
 }
 
@@ -103,9 +110,12 @@ function unwrapEnvelope(payload: unknown): unknown {
   if (result === false) {
     throw new ApiError(400, String(errorMessage || "Request failed"));
   }
-  if ("Data" in payload) return payload.Data;
-  if ("data" in payload) return payload.data;
-  return null;
+  let data: unknown;
+  if ("Data" in payload) data = payload.Data;
+  else if ("data" in payload) data = payload.data;
+  else return null;
+  if (typeof data === "string") return decode(data);
+  return data;
 }
 
 function decode(text: string): unknown {
@@ -179,26 +189,91 @@ function num(value: unknown, fallback = 0): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-function asRoom(data: unknown): ScanQrResult {
-  let row: Record<string, unknown> = {};
-  if (Array.isArray(data) && isPlainObject(data[0])) row = data[0];
-  else if (isPlainObject(data)) {
-    row = isPlainObject(data.room) ? { ...data, ...data.room } : data;
+function pickNum(row: Record<string, unknown>, names: string[]): number {
+  const want = new Set(names.map((n) => n.toLowerCase()));
+  for (const [key, value] of Object.entries(row)) {
+    if (!want.has(key.toLowerCase())) continue;
+    const n = num(value);
+    if (n) return n;
   }
-  const id = num(row.id ?? row.roomId);
+  return 0;
+}
+
+function pickStr(row: Record<string, unknown>, names: string[]): string {
+  const want = new Set(names.map((n) => n.toLowerCase()));
+  for (const [key, value] of Object.entries(row)) {
+    if (!want.has(key.toLowerCase())) continue;
+    if (value == null) continue;
+    const s = String(value).trim();
+    if (s) return s;
+  }
+  return "";
+}
+
+function coerceRow(data: unknown): Record<string, unknown> {
+  if (typeof data === "number" && Number.isFinite(data)) return { id: data };
+  if (typeof data === "string") {
+    const trimmed = data.trim();
+    if (!trimmed) return {};
+    const asNum = Number(trimmed);
+    if (Number.isFinite(asNum) && trimmed !== "") return { id: asNum };
+    const parsed = decode(trimmed);
+    if (parsed !== trimmed) return coerceRow(parsed);
+    return { qrCodeIdentifier: trimmed };
+  }
+  if (Array.isArray(data)) return coerceRow(data[0]);
+  if (!isPlainObject(data)) return {};
+  const nested =
+    data.room ?? data.Room ?? data.row ?? data.Row ?? data.data ?? data.Data;
+  if (nested && nested !== data && (Array.isArray(nested) || isPlainObject(nested))) {
+    return { ...data, ...coerceRow(nested) };
+  }
+  const rows = asArray(data);
+  if (rows.length && rows[0] !== data && isPlainObject(rows[0])) {
+    return { ...data, ...rows[0] };
+  }
+  return data;
+}
+
+function asRoom(data: unknown): ScanQrResult {
+  const row = coerceRow(data);
+  const id = pickNum(row, ["id", "roomId", "roomID", "pk"]);
   return {
     id,
-    workAreaId: num(row.workAreaId),
-    roomNumber: String(row.roomNumber ?? row.number ?? ""),
-    name: String(row.name ?? row.roomName ?? ""),
-    qrCodeIdentifier: String(row.qrCodeIdentifier ?? row.qr ?? ""),
-    description: String(row.description ?? ""),
-    isActive: row.isActive !== false,
-    workAreaName: String(row.workAreaName ?? ""),
-    siteName: String(row.siteName ?? ""),
-    siteId: num(row.siteId),
-    siteAddress: String(row.siteAddress ?? ""),
+    workAreaId: pickNum(row, ["workAreaId", "workareaid"]),
+    roomNumber: pickStr(row, ["roomNumber", "number", "roomNo"]),
+    name: pickStr(row, ["name", "roomName"]),
+    qrCodeIdentifier: pickStr(row, ["qrCodeIdentifier", "qr", "qrCode"]),
+    description: pickStr(row, ["description"]),
+    isActive: row.isActive !== false && row.IsActive !== false,
+    workAreaName: pickStr(row, ["workAreaName"]),
+    siteName: pickStr(row, ["siteName"]),
+    siteId: pickNum(row, ["siteId"]),
+    siteAddress: pickStr(row, ["siteAddress"]),
   };
+}
+
+async function resolveRoom(qrCodeIdentifier: string, raw: unknown): Promise<ScanQrResult> {
+  const room = asRoom(raw);
+  if (!room.qrCodeIdentifier) room.qrCodeIdentifier = qrCodeIdentifier;
+  if (room.id) return room;
+
+  const token = readSession()?.token;
+  if (token) {
+    try {
+      const rooms = asArray<unknown>(await post("/Access/getrooms", { token })).map((row) =>
+        asRoom(row),
+      );
+      const needle = qrCodeIdentifier.trim().toLowerCase();
+      const match = rooms.find((r) => r.qrCodeIdentifier.toLowerCase() === needle);
+      if (match?.id) {
+        return { ...room, ...match, qrCodeIdentifier: match.qrCodeIdentifier || qrCodeIdentifier };
+      }
+    } catch {
+      /* worker phones will not have a staff token */
+    }
+  }
+  return room;
 }
 
 function placeholderUser(email: string): User {
@@ -314,8 +389,17 @@ export const api = {
     return { token, user: user ?? placeholderUser(req.email) };
   },
   signup: (req: CreateUserRequest) => post<unknown>("/Access/signup", req),
-  scanQr: async (qrCodeIdentifier: string) =>
-    asRoom(await post<unknown>("/Access/scanqr", { qrCodeIdentifier })),
+  scanQr: async (qrCodeIdentifier: string) => {
+    const raw = await post<unknown>("/Access/scanqr", { qrCodeIdentifier });
+    const room = await resolveRoom(qrCodeIdentifier, raw);
+    if (!room.id) {
+      throw new ApiError(
+        400,
+        "QR was accepted but AccessControl did not return a room id. Scan a room QR that exists in the database.",
+      );
+    }
+    return room;
+  },
 
   getSites: (token: string) => post<Site[]>("/Access/getsites", { token }).then(asArray<Site>),
   insertSite: (token: string, data: Omit<Site, "id" | "isActive">) =>
@@ -376,21 +460,31 @@ export const api = {
     reason: string;
     workType: string;
     description: string;
+    qrCodeIdentifier?: string;
   }) => {
     const roomId = num(data.roomId);
     const workerId = num(data.workerId);
     if (!roomId) {
       throw new ApiError(400, "Room id is missing. Scan the room QR again.");
     }
-    const payload = {
+    const payload: Record<string, unknown> = {
       phoneNumber: data.phoneNumber,
+      PhoneNumber: data.phoneNumber,
       workerId,
+      WorkerId: workerId,
       roomId,
       RoomId: roomId,
       reason: data.reason,
+      Reason: data.reason,
       workType: data.workType,
+      WorkType: data.workType,
       description: data.description,
+      Description: data.description,
     };
+    if (data.qrCodeIdentifier) {
+      payload.qrCodeIdentifier = data.qrCodeIdentifier;
+      payload.QrCodeIdentifier = data.qrCodeIdentifier;
+    }
     return asRequest(await post<unknown>("/Access/insertaccessrequest", payload), {
       ...data,
       roomId,

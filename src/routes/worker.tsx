@@ -11,10 +11,10 @@ import {
 } from "lucide-react";
 import { BrandMark, Button, Field, Input, Select, Textarea, toast } from "@/components/ui";
 import { QrImage } from "@/components/QrImage";
-import { api } from "@/lib/api/client";
-import { ApiError, PHOTO_TYPES, WORK_TYPES } from "@/lib/api/types";
+import { api, USE_MOCK } from "@/lib/api/client";
+import { ApiError, PHOTO_TYPES, WORK_TYPES, type Room } from "@/lib/api/types";
 import { compressImage } from "@/lib/image";
-import { writeWorkerSession, readWorkerSession } from "@/lib/session";
+import { writeWorkerSession, readWorkerSession, readSession } from "@/lib/session";
 import { useWorkerFlow } from "@/lib/worker-flow";
 import { prettyPhone, whenExact } from "@/lib/format";
 import { useMounted } from "@/lib/use-mounted";
@@ -96,13 +96,25 @@ function ScanStep() {
   const [camError, setCamError] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
   const [camOn, setCamOn] = useState(false);
+  const [liveRooms, setLiveRooms] = useState<Room[]>([]);
+
+  useEffect(() => {
+    if (USE_MOCK) return;
+    const token = readSession()?.token;
+    if (!token) return;
+    void api
+      .getRooms(token)
+      .then((rows) => setLiveRooms(rows.filter((r) => r.isActive !== false && r.qrCodeIdentifier)))
+      .catch(() => setLiveRooms([]));
+  }, []);
 
   async function go(qr: string) {
     setBusy(true);
     setError("");
     try {
-      const room = await api.scanQr(qr.trim());
-      flow.set({ qrCodeIdentifier: room.qrCodeIdentifier, room, step: "phone" });
+      const code = qr.trim();
+      const room = await api.scanQr(code);
+      flow.set({ qrCodeIdentifier: code, room, step: "phone" });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "QR not recognised.");
     } finally {
@@ -174,10 +186,16 @@ function ScanStep() {
         {busy ? "Looking up…" : "Continue"}
       </Button>
       <p className="sg-label" style={{ marginTop: 8 }}>
-        Demo rooms
+        {USE_MOCK ? "Demo rooms" : "Rooms from AccessControl"}
       </p>
       <div className="sg-room-grid">
-        {DEMO_ROOMS.map((r) => (
+        {(USE_MOCK ? DEMO_ROOMS : liveRooms.map((r) => ({
+          qr: r.qrCodeIdentifier,
+          room: r.roomNumber,
+          name: r.name,
+          site: "",
+          note: r.qrCodeIdentifier,
+        }))).map((r) => (
           <button key={r.qr} className="sg-room-pick" onClick={() => void go(r.qr)} disabled={busy}>
             <QrImage value={r.qr} size={64} />
             <div>
@@ -191,6 +209,12 @@ function ScanStep() {
           </button>
         ))}
       </div>
+      {!USE_MOCK && !liveRooms.length ? (
+        <p className="sg-help">
+          Demo codes like SG-RIV-A101 are not in your database. Sign in as a manager, add a room
+          under Rooms, then scan that QR here.
+        </p>
+      ) : null}
     </>
   );
 }
@@ -363,11 +387,44 @@ function FormStep() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    if (flow.room?.id) return;
+    const qr = flow.qrCodeIdentifier.trim();
+    if (!qr) {
+      flow.set({ step: "scan" });
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const room = await api.scanQr(qr);
+        if (!cancelled && room.id) flow.set({ room, qrCodeIdentifier: qr });
+        else if (!cancelled) flow.set({ step: "scan" });
+      } catch {
+        if (!cancelled) flow.set({ step: "scan" });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
-    const roomId = Number(flow.room?.id ?? (flow.room as { roomId?: number } | null)?.roomId ?? 0);
-    if (!flow.room || !roomId) {
-      setError("Room is missing. Go back and scan the QR again.");
+    let roomId = Number(flow.room?.id ?? (flow.room as { roomId?: number } | null)?.roomId ?? 0);
+    const qr = flow.qrCodeIdentifier.trim();
+    if (!roomId && qr) {
+      try {
+        const room = await api.scanQr(qr);
+        roomId = room.id;
+        if (room.id) flow.set({ room });
+      } catch {
+        /* fall through to the missing-room error */
+      }
+    }
+    if (!roomId) {
+      setError("Room is missing. Go back and scan a QR that exists in AccessControl.");
       return;
     }
     setBusy(true);
@@ -400,6 +457,7 @@ function FormStep() {
         reason: form.reason,
         workType: form.workType,
         description: form.description,
+        qrCodeIdentifier: qr || flow.room?.qrCodeIdentifier,
       });
       flow.set({ worker, request, mode: "waiting", step: "waiting" });
       toast("Request sent to the site manager");
