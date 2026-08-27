@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button, toast } from "@/components/ui";
 import { api } from "@/lib/api/client";
 import { readSession } from "@/lib/session";
-import { ApiError, type AccessRequestApproval } from "@/lib/api/types";
+import { ApiError, type AccessRequest, type AccessRequestApproval } from "@/lib/api/types";
 
 const ACTIONS = [
   { status: "Approved", label: "Approve", variant: "ok" as const },
@@ -13,10 +13,12 @@ const ACTIONS = [
 export function ApprovalActions({
   approval,
   accessRequestId,
+  request,
   onDone,
 }: {
   approval: Pick<AccessRequestApproval, "id" | "accessRequestId" | "approverUserId">;
   accessRequestId?: number;
+  request?: Pick<AccessRequest, "id" | "workerId" | "roomId" | "reason" | "workType" | "description">;
   onDone?: () => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -28,7 +30,7 @@ export function ApprovalActions({
       return;
     }
     const accessRequestApprovalId = Number(approval.id);
-    const requestId = Number(accessRequestId || approval.accessRequestId);
+    const requestId = Number(accessRequestId || approval.accessRequestId || request?.id);
     if (!accessRequestApprovalId) {
       toast("Missing AccessRequestApprovalId.");
       return;
@@ -43,6 +45,11 @@ export function ApprovalActions({
         id: accessRequestApprovalId,
         accessRequestId: requestId,
         approverUserId: Number(approval.approverUserId) || session.user.id || undefined,
+        workerId: request?.workerId,
+        roomId: request?.roomId,
+        reason: request?.reason,
+        workType: request?.workType,
+        description: request?.description,
         status,
         comment: "",
         reviewedAt: new Date().toISOString().slice(0, 19),

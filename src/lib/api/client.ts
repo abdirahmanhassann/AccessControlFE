@@ -627,6 +627,11 @@ export const api = {
       comment?: string | null;
       reviewedAt?: string | null;
       approverUserId?: number;
+      workerId?: number;
+      roomId?: number;
+      reason?: string | null;
+      workType?: string | null;
+      description?: string | null;
     },
   ) => {
     const accessRequestApprovalId = num(data.id);
@@ -638,6 +643,8 @@ export const api = {
       throw new ApiError(400, "AccessRequestId is required.");
     }
     const reviewedAt = data.reviewedAt ?? new Date().toISOString().slice(0, 19);
+    const approved = /^approved$/i.test(data.status);
+    const rejected = /^rejected$/i.test(data.status);
     const payload: Record<string, unknown> = {
       token,
       id: accessRequestApprovalId,
@@ -646,9 +653,18 @@ export const api = {
       status: data.status,
       comment: data.comment ?? "",
       reviewedAt,
+      reason: data.reason ?? data.comment ?? "",
+      workType: data.workType ?? "",
+      description: data.description ?? "",
+      approvedAt: approved ? reviewedAt : null,
+      rejectedAt: rejected ? reviewedAt : null,
     };
     const approverUserId = num(data.approverUserId);
+    const workerId = num(data.workerId);
+    const roomId = num(data.roomId);
     if (approverUserId) payload.approverUserId = approverUserId;
+    if (workerId) payload.workerId = workerId;
+    if (roomId) payload.roomId = roomId;
     return post<AccessRequestApproval | null>("/Access/updateaccessrequestapproval", dual(payload));
   },
 

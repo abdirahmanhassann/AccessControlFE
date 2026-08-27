@@ -54,6 +54,11 @@ function RequestDetail() {
           existing.approverUserId ||
           session.user.id ||
           data.users.find((u) => u.email?.toLowerCase() === session.user.email.toLowerCase())?.id,
+        workerId: req.workerId,
+        roomId: req.roomId,
+        reason: req.reason,
+        workType: req.workType,
+        description: req.description,
         status,
         comment,
         reviewedAt: new Date().toISOString().slice(0, 19),

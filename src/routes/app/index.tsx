@@ -140,6 +140,7 @@ function Overview() {
                       <ApprovalActions
                         approval={a}
                         accessRequestId={a.accessRequestId || req?.id}
+                        request={req}
                         onDone={reload}
                       />
                     </td>
