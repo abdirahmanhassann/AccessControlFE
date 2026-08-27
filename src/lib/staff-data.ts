@@ -49,7 +49,7 @@ function settled<T>(result: PromiseSettledResult<T[]>): T[] {
   return result.status === "fulfilled" ? asArray<T>(result.value) : [];
 }
 
-export function useStaffData(token: string | undefined) {
+export function useStaffData(token: string | undefined, options?: { pollRequests?: boolean }) {
   const [data, setData] = useState<StaffData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -110,10 +110,30 @@ export function useStaffData(token: string | undefined) {
     }
   }, [token]);
 
+  const refreshRequests = useCallback(async () => {
+    if (!token) return;
+    try {
+      const requests = await api.getAccessRequests(token);
+      setData((prev) => (prev ? { ...prev, requests } : prev));
+    } catch {
+      /* keep last list; polling should not surface a flash error */
+    }
+  }, [token]);
+
   useEffect(() => {
     setLoading(true);
     void reload();
   }, [reload]);
+
+  useEffect(() => {
+    if (!token || !options?.pollRequests) return;
+    const tick = () => {
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      void refreshRequests();
+    };
+    const id = window.setInterval(tick, 30_000);
+    return () => window.clearInterval(id);
+  }, [token, options?.pollRequests, refreshRequests]);
 
   return { data, error, loading, reload };
 }

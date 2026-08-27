@@ -21,7 +21,7 @@ function Overview() {
   const mounted = useMounted();
   const [token, setToken] = useState<string>();
   useEffect(() => setToken(readSession()?.token), []);
-  const { data, error, loading, reload } = useStaffData(token);
+  const { data, error, loading, reload } = useStaffData(token, { pollRequests: true });
 
   if (!mounted || loading || !data) return <PageSkeleton />;
 

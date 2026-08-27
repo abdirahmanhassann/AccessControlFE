@@ -27,7 +27,7 @@ function RequestDetail() {
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
   useEffect(() => setToken(readSession()?.token), []);
-  const { data, loading, reload, error } = useStaffData(token);
+  const { data, loading, reload, error } = useStaffData(token, { pollRequests: true });
   const req = data?.requests.find((r) => r.id === Number(id));
 
   async function decide(status: "Approved" | "Rejected" | "Cancelled") {

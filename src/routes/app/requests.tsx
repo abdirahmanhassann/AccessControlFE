@@ -15,7 +15,7 @@ function RequestsPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
   useEffect(() => setToken(readSession()?.token), []);
-  const { data, error, loading, reload } = useStaffData(token);
+  const { data, error, loading, reload } = useStaffData(token, { pollRequests: true });
 
   const rows = useMemo(() => {
     if (!data) return [];
