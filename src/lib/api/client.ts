@@ -620,18 +620,36 @@ export const api = {
     ),
   updateApproval: (
     token: string,
-    data: { id: number; status: string; comment?: string | null; reviewedAt?: string | null },
-  ) =>
-    post<AccessRequestApproval | null>(
+    data: {
+      id?: number;
+      accessRequestId: number;
+      approverUserId: number;
+      status: string;
+      comment?: string | null;
+      reviewedAt?: string | null;
+    },
+  ) => {
+    const accessRequestId = num(data.accessRequestId);
+    const approverUserId = num(data.approverUserId);
+    if (!accessRequestId) {
+      throw new ApiError(400, "Access request id is missing on this approval row.");
+    }
+    if (!approverUserId) {
+      throw new ApiError(400, "Approver user id is missing. Sign in as a staff user from Users.");
+    }
+    return post<AccessRequestApproval | null>(
       "/Access/updateaccessrequestapproval",
       dual({
         token,
-        id: data.id,
+        id: num(data.id),
+        accessRequestId,
+        approverUserId,
         status: data.status,
-        comment: data.comment ?? null,
-        reviewedAt: data.reviewedAt ?? null,
+        comment: data.comment ?? "",
+        reviewedAt: data.reviewedAt ?? new Date().toISOString(),
       }),
-    ),
+    );
+  },
 
   getPhotos: (token: string) =>
     post<AccessPhoto[]>("/Access/getaccessphotos", { token }).then(asArray<AccessPhoto>),

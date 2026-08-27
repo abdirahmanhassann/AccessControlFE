@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Button, toast } from "@/components/ui";
 import { api } from "@/lib/api/client";
 import { readSession } from "@/lib/session";
-import { ApiError } from "@/lib/api/types";
+import { ApiError, type AccessRequestApproval } from "@/lib/api/types";
 
 const ACTIONS = [
   { status: "Approved", label: "Approve", variant: "ok" as const },
@@ -11,10 +11,10 @@ const ACTIONS = [
 ];
 
 export function ApprovalActions({
-  approvalId,
+  approval,
   onDone,
 }: {
-  approvalId: number;
+  approval: Pick<AccessRequestApproval, "id" | "accessRequestId" | "approverUserId">;
   onDone?: () => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -25,14 +25,22 @@ export function ApprovalActions({
       toast("Sign in as staff first.");
       return;
     }
-    if (!approvalId) {
-      toast("This row has no approval id.");
+    const accessRequestId = Number(approval.accessRequestId);
+    const approverUserId = Number(approval.approverUserId) || session.user.id;
+    if (!accessRequestId) {
+      toast("This approval has no access request id.");
+      return;
+    }
+    if (!approverUserId) {
+      toast("Approver user id is missing. Sign in again as a manager from Users.");
       return;
     }
     setBusy(status);
     try {
       await api.updateApproval(session.token, {
-        id: approvalId,
+        id: approval.id,
+        accessRequestId,
+        approverUserId,
         status,
         comment: "",
         reviewedAt: new Date().toISOString(),

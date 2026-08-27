@@ -1156,7 +1156,14 @@ const handlers: Record<string, (body: Body) => unknown> = {
   "/Access/updateaccessrequestapproval": (body) => {
     requireStaff(body as { token?: string });
     const db = load();
-    const row = db.approvals.find((a) => a.id === Number(body.id));
+    const row =
+      db.approvals.find((a) => a.id && a.id === Number(body.id)) ||
+      db.approvals.find(
+        (a) =>
+          a.accessRequestId === Number(body.accessRequestId) &&
+          a.approverUserId === Number(body.approverUserId),
+      ) ||
+      db.approvals.find((a) => a.accessRequestId === Number(body.accessRequestId));
     if (!row) throw new ApiError(404, "Approval not found.");
     row.status = String(body.status ?? row.status);
     if ("comment" in body) row.comment = String(body.comment ?? "");

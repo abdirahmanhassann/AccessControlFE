@@ -137,7 +137,7 @@ function Overview() {
                     </td>
                     <td className="sg-mono">{whenReviewed(a.reviewedAt)}</td>
                     <td>
-                      <ApprovalActions approvalId={a.id} onDone={reload} />
+                      <ApprovalActions approval={a} onDone={reload} />
                     </td>
                   </tr>
                 );

@@ -36,14 +36,26 @@ function RequestDetail() {
     const existing =
       data.approvals.find((a) => a.accessRequestId === req.id && /^pending$/i.test(String(a.status))) ||
       latestApproval(data, req.id);
-    if (!existing?.id) {
-      toast("No AccessRequestApprovals row to update for this request.");
+    const accessRequestId = existing?.accessRequestId || req.id;
+    const approverUserId =
+      existing?.approverUserId ||
+      session.user.id ||
+      data.users.find((u) => u.email?.toLowerCase() === session.user.email.toLowerCase())?.id ||
+      0;
+    if (!accessRequestId) {
+      toast("No access request id on this row.");
+      return;
+    }
+    if (!approverUserId) {
+      toast("Approver user id is missing. Sign in again as a manager from Users.");
       return;
     }
     setBusy(true);
     try {
       await api.updateApproval(session.token, {
-        id: existing.id,
+        id: existing?.id,
+        accessRequestId,
+        approverUserId,
         status,
         comment,
         reviewedAt: new Date().toISOString(),
