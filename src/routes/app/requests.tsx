@@ -75,7 +75,7 @@ function RequestsPage() {
                   <td className="sg-mono">{when(r.createdAt)}</td>
                   <td>
                     {approval?.id || approval?.accessRequestId ? (
-                      <ApprovalActions approval={approval} onDone={reload} />
+                      <ApprovalActions approval={approval} accessRequestId={r.id} onDone={reload} />
                     ) : (
                       <span className="sg-help">No approval row</span>
                     )}

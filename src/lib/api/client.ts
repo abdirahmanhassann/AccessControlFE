@@ -622,28 +622,32 @@ export const api = {
     token: string,
     data: {
       id: number;
+      accessRequestId: number;
       status: string;
       comment?: string | null;
       reviewedAt?: string | null;
-      accessRequestId?: number;
       approverUserId?: number;
     },
   ) => {
-    const id = num(data.id);
-    if (!id) {
-      throw new ApiError(400, "Approval id is required. AccessRequestApprovalsUpdate keys on Id.");
+    const accessRequestApprovalId = num(data.id);
+    const accessRequestId = num(data.accessRequestId);
+    if (!accessRequestApprovalId) {
+      throw new ApiError(400, "AccessRequestApprovalId is required.");
+    }
+    if (!accessRequestId) {
+      throw new ApiError(400, "AccessRequestId is required.");
     }
     const reviewedAt = data.reviewedAt ?? new Date().toISOString().slice(0, 19);
     const payload: Record<string, unknown> = {
       token,
-      id,
+      id: accessRequestApprovalId,
+      accessRequestApprovalId,
+      accessRequestId,
       status: data.status,
       comment: data.comment ?? "",
       reviewedAt,
     };
-    const accessRequestId = num(data.accessRequestId);
     const approverUserId = num(data.approverUserId);
-    if (accessRequestId) payload.accessRequestId = accessRequestId;
     if (approverUserId) payload.approverUserId = approverUserId;
     return post<AccessRequestApproval | null>("/Access/updateaccessrequestapproval", dual(payload));
   },

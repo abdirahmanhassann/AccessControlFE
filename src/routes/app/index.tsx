@@ -137,7 +137,11 @@ function Overview() {
                     </td>
                     <td className="sg-mono">{whenReviewed(a.reviewedAt)}</td>
                     <td>
-                      <ApprovalActions approval={a} onDone={reload} />
+                      <ApprovalActions
+                        approval={a}
+                        accessRequestId={a.accessRequestId || req?.id}
+                        onDone={reload}
+                      />
                     </td>
                   </tr>
                 );

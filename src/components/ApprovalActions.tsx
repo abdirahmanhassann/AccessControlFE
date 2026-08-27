@@ -12,9 +12,11 @@ const ACTIONS = [
 
 export function ApprovalActions({
   approval,
+  accessRequestId,
   onDone,
 }: {
   approval: Pick<AccessRequestApproval, "id" | "accessRequestId" | "approverUserId">;
+  accessRequestId?: number;
   onDone?: () => void;
 }) {
   const [busy, setBusy] = useState<string | null>(null);
@@ -25,15 +27,21 @@ export function ApprovalActions({
       toast("Sign in as staff first.");
       return;
     }
-    if (!approval.id) {
-      toast("This approval has no Id. AccessRequestApprovalsUpdate needs the row Id.");
+    const accessRequestApprovalId = Number(approval.id);
+    const requestId = Number(accessRequestId || approval.accessRequestId);
+    if (!accessRequestApprovalId) {
+      toast("Missing AccessRequestApprovalId.");
+      return;
+    }
+    if (!requestId) {
+      toast("Missing AccessRequestId.");
       return;
     }
     setBusy(status);
     try {
       await api.updateApproval(session.token, {
-        id: approval.id,
-        accessRequestId: Number(approval.accessRequestId) || undefined,
+        id: accessRequestApprovalId,
+        accessRequestId: requestId,
         approverUserId: Number(approval.approverUserId) || session.user.id || undefined,
         status,
         comment: "",

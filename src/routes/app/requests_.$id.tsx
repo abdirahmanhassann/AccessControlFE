@@ -37,14 +37,19 @@ function RequestDetail() {
       data.approvals.find((a) => a.accessRequestId === req.id && /^pending$/i.test(String(a.status))) ||
       latestApproval(data, req.id);
     if (!existing?.id) {
-      toast("No AccessRequestApprovals.Id to update. The SP keys on Id.");
+      toast("No AccessRequestApprovalId to update.");
+      return;
+    }
+    const requestId = existing.accessRequestId || req.id;
+    if (!requestId) {
+      toast("No AccessRequestId to update.");
       return;
     }
     setBusy(true);
     try {
       await api.updateApproval(session.token, {
         id: existing.id,
-        accessRequestId: existing.accessRequestId || req.id,
+        accessRequestId: requestId,
         approverUserId:
           existing.approverUserId ||
           session.user.id ||
