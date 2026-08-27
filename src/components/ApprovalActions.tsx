@@ -25,25 +25,19 @@ export function ApprovalActions({
       toast("Sign in as staff first.");
       return;
     }
-    const accessRequestId = Number(approval.accessRequestId);
-    const approverUserId = Number(approval.approverUserId) || session.user.id;
-    if (!accessRequestId) {
-      toast("This approval has no access request id.");
-      return;
-    }
-    if (!approverUserId) {
-      toast("Approver user id is missing. Sign in again as a manager from Users.");
+    if (!approval.id) {
+      toast("This approval has no Id. AccessRequestApprovalsUpdate needs the row Id.");
       return;
     }
     setBusy(status);
     try {
       await api.updateApproval(session.token, {
         id: approval.id,
-        accessRequestId,
-        approverUserId,
+        accessRequestId: Number(approval.accessRequestId) || undefined,
+        approverUserId: Number(approval.approverUserId) || session.user.id || undefined,
         status,
         comment: "",
-        reviewedAt: new Date().toISOString(),
+        reviewedAt: new Date().toISOString().slice(0, 19),
       });
       toast(status === "Approved" ? "Approved" : status === "Rejected" ? "Rejected" : "Cancelled");
       await onDone?.();

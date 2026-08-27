@@ -36,29 +36,22 @@ function RequestDetail() {
     const existing =
       data.approvals.find((a) => a.accessRequestId === req.id && /^pending$/i.test(String(a.status))) ||
       latestApproval(data, req.id);
-    const accessRequestId = existing?.accessRequestId || req.id;
-    const approverUserId =
-      existing?.approverUserId ||
-      session.user.id ||
-      data.users.find((u) => u.email?.toLowerCase() === session.user.email.toLowerCase())?.id ||
-      0;
-    if (!accessRequestId) {
-      toast("No access request id on this row.");
-      return;
-    }
-    if (!approverUserId) {
-      toast("Approver user id is missing. Sign in again as a manager from Users.");
+    if (!existing?.id) {
+      toast("No AccessRequestApprovals.Id to update. The SP keys on Id.");
       return;
     }
     setBusy(true);
     try {
       await api.updateApproval(session.token, {
-        id: existing?.id,
-        accessRequestId,
-        approverUserId,
+        id: existing.id,
+        accessRequestId: existing.accessRequestId || req.id,
+        approverUserId:
+          existing.approverUserId ||
+          session.user.id ||
+          data.users.find((u) => u.email?.toLowerCase() === session.user.email.toLowerCase())?.id,
         status,
         comment,
-        reviewedAt: new Date().toISOString(),
+        reviewedAt: new Date().toISOString().slice(0, 19),
       });
       toast(status === "Approved" ? "Approved" : status === "Rejected" ? "Rejected" : "Cancelled");
       await reload();

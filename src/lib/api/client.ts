@@ -621,34 +621,31 @@ export const api = {
   updateApproval: (
     token: string,
     data: {
-      id?: number;
-      accessRequestId: number;
-      approverUserId: number;
+      id: number;
       status: string;
       comment?: string | null;
       reviewedAt?: string | null;
+      accessRequestId?: number;
+      approverUserId?: number;
     },
   ) => {
+    const id = num(data.id);
+    if (!id) {
+      throw new ApiError(400, "Approval id is required. AccessRequestApprovalsUpdate keys on Id.");
+    }
+    const reviewedAt = data.reviewedAt ?? new Date().toISOString().slice(0, 19);
+    const payload: Record<string, unknown> = {
+      token,
+      id,
+      status: data.status,
+      comment: data.comment ?? "",
+      reviewedAt,
+    };
     const accessRequestId = num(data.accessRequestId);
     const approverUserId = num(data.approverUserId);
-    if (!accessRequestId) {
-      throw new ApiError(400, "Access request id is missing on this approval row.");
-    }
-    if (!approverUserId) {
-      throw new ApiError(400, "Approver user id is missing. Sign in as a staff user from Users.");
-    }
-    return post<AccessRequestApproval | null>(
-      "/Access/updateaccessrequestapproval",
-      dual({
-        token,
-        id: num(data.id),
-        accessRequestId,
-        approverUserId,
-        status: data.status,
-        comment: data.comment ?? "",
-        reviewedAt: data.reviewedAt ?? new Date().toISOString(),
-      }),
-    );
+    if (accessRequestId) payload.accessRequestId = accessRequestId;
+    if (approverUserId) payload.approverUserId = approverUserId;
+    return post<AccessRequestApproval | null>("/Access/updateaccessrequestapproval", dual(payload));
   },
 
   getPhotos: (token: string) =>
