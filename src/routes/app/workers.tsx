@@ -1,12 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Badge, Button, Field, Input, Modal, PageSkeleton, toast } from "@/components/ui";
+import { Badge, Button, Field, Input, Modal, PageSkeleton, Select, toast } from "@/components/ui";
 import { readSession } from "@/lib/session";
 import { useStaffData } from "@/lib/staff-data";
 import { useMounted } from "@/lib/use-mounted";
 import { prettyPhone } from "@/lib/format";
 import { api } from "@/lib/api/client";
-import type { Worker } from "@/lib/api/types";
+import type { Site, Worker, WorkerSiteMapping } from "@/lib/api/types";
 
 export const Route = createFileRoute("/app/workers")({ component: WorkersPage });
 
@@ -58,6 +58,7 @@ function WorkersPage() {
       </div>
       {edit ? (
         <WorkerForm
+          sites={data.sites}
           initial={
             edit === "new"
               ? { firstName: "", lastName: "", phoneNumber: "", companyName: "", isActive: true }
@@ -88,15 +89,42 @@ function WorkersPage() {
 
 function WorkerForm({
   initial,
+  sites,
   onClose,
   onSave,
 }: {
   initial: Partial<Worker>;
+  sites: Site[];
   onClose: () => void;
   onSave: (v: Partial<Worker>) => Promise<void>;
 }) {
   const [v, setV] = useState(initial);
   const [busy, setBusy] = useState(false);
+  const [siteMaps, setSiteMaps] = useState<WorkerSiteMapping[]>([]);
+  const [pick, setPick] = useState("");
+
+  useEffect(() => {
+    const t = readSession()?.token;
+    if (!t || !initial.id) return;
+    void api.getWorkerSiteMappings(t).then((rows) => setSiteMaps(rows.filter((r) => r.workerId === initial.id)));
+  }, [initial.id]);
+
+  async function addSite() {
+    const t = readSession()?.token;
+    if (!t || !initial.id || !pick) return;
+    await api.insertWorkerSiteMapping(t, { workerId: initial.id, siteId: Number(pick) });
+    const rows = await api.getWorkerSiteMappings(t);
+    setSiteMaps(rows.filter((r) => r.workerId === initial.id));
+    setPick("");
+  }
+
+  async function removeSite(id: number) {
+    const t = readSession()?.token;
+    if (!t) return;
+    await api.deleteWorkerSiteMapping(t, id);
+    setSiteMaps((prev) => prev.filter((r) => r.id !== id));
+  }
+
   return (
     <Modal title={initial.id ? "Edit worker" : "New worker"} onClose={onClose}>
       <div className="sg-form-grid two">
@@ -114,14 +142,41 @@ function WorkerForm({
         <Input value={v.companyName ?? ""} onChange={(e) => setV({ ...v, companyName: e.target.value })} />
       </Field>
       {initial.id ? (
-        <label className="sg-field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <input
-            type="checkbox"
-            checked={v.isActive !== false}
-            onChange={(e) => setV({ ...v, isActive: e.target.checked })}
-          />
-          Active
-        </label>
+        <>
+          <label className="sg-field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+            <input
+              type="checkbox"
+              checked={v.isActive !== false}
+              onChange={(e) => setV({ ...v, isActive: e.target.checked })}
+            />
+            Active
+          </label>
+          <Field label="Sites this worker can request access on">
+            <div className="sg-actions">
+              <Select value={pick} onChange={(e) => setPick(e.target.value)}>
+                <option value="">Add site…</option>
+                {sites
+                  .filter((s) => !siteMaps.some((m) => m.siteId === s.id))
+                  .map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+              </Select>
+              <Button size="sm" disabled={!pick} onClick={() => void addSite()}>
+                Add
+              </Button>
+            </div>
+            {siteMaps.map((m) => (
+              <div key={m.id} className="sg-list-item">
+                <span>{m.siteName || sites.find((s) => s.id === m.siteId)?.name || `Site #${m.siteId}`}</span>
+                <Button size="sm" variant="danger" onClick={() => void removeSite(m.id)}>
+                  Remove
+                </Button>
+              </div>
+            ))}
+          </Field>
+        </>
       ) : null}
       <div className="sg-actions">
         <Button

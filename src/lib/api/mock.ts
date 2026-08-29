@@ -786,6 +786,11 @@ const handlers: Record<string, (body: Body) => unknown> = {
     requireSession(body as { token?: string });
     return load().users.map(publicUser);
   },
+  "/Access/getmanagersforroom": (body) => {
+    const room = load().rooms.find((r) => r.id === Number(body.roomId ?? body.RoomId));
+    if (!room) return [];
+    return managersForWorkArea(room.workAreaId).map(publicUser);
+  },
   "/Access/insertuser": (body) => {
     requireStaff(body as { token?: string });
     const db = load();

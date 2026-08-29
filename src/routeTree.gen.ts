@@ -17,6 +17,7 @@ import { Route as WorkerRouteImport } from './routes/worker'
 import { Route as AppIndexRouteImport } from './routes/app/index'
 import { Route as AppAreasRouteImport } from './routes/app/areas'
 import { Route as AppAuditRouteImport } from './routes/app/audit'
+import { Route as AppDepartmentsRouteImport } from './routes/app/departments'
 import { Route as AppHoursRouteImport } from './routes/app/hours'
 import { Route as AppNotificationsRouteImport } from './routes/app/notifications'
 import { Route as AppRequestsRouteImport } from './routes/app/requests'
@@ -65,6 +66,11 @@ const AppAreasRoute = AppAreasRouteImport.update({
 const AppAuditRoute = AppAuditRouteImport.update({
   id: '/audit',
   path: '/audit',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDepartmentsRoute = AppDepartmentsRouteImport.update({
+  id: '/departments',
+  path: '/departments',
   getParentRoute: () => AppRoute,
 } as any)
 const AppHoursRoute = AppHoursRouteImport.update({
@@ -121,6 +127,7 @@ export interface FileRoutesByFullPath {
   '/worker': typeof WorkerRoute
   '/app/areas': typeof AppAreasRoute
   '/app/audit': typeof AppAuditRoute
+  '/app/departments': typeof AppDepartmentsRoute
   '/app/hours': typeof AppHoursRoute
   '/app/notifications': typeof AppNotificationsRoute
   '/app/requests': typeof AppRequestsRoute
@@ -139,6 +146,7 @@ export interface FileRoutesByTo {
   '/worker': typeof WorkerRoute
   '/app/areas': typeof AppAreasRoute
   '/app/audit': typeof AppAuditRoute
+  '/app/departments': typeof AppDepartmentsRoute
   '/app/hours': typeof AppHoursRoute
   '/app/notifications': typeof AppNotificationsRoute
   '/app/requests': typeof AppRequestsRoute
@@ -159,6 +167,7 @@ export interface FileRoutesById {
   '/worker': typeof WorkerRoute
   '/app/areas': typeof AppAreasRoute
   '/app/audit': typeof AppAuditRoute
+  '/app/departments': typeof AppDepartmentsRoute
   '/app/hours': typeof AppHoursRoute
   '/app/notifications': typeof AppNotificationsRoute
   '/app/requests': typeof AppRequestsRoute
@@ -180,6 +189,7 @@ export interface FileRouteTypes {
     | '/worker'
     | '/app/areas'
     | '/app/audit'
+    | '/app/departments'
     | '/app/hours'
     | '/app/notifications'
     | '/app/requests'
@@ -198,6 +208,7 @@ export interface FileRouteTypes {
     | '/worker'
     | '/app/areas'
     | '/app/audit'
+    | '/app/departments'
     | '/app/hours'
     | '/app/notifications'
     | '/app/requests'
@@ -217,6 +228,7 @@ export interface FileRouteTypes {
     | '/worker'
     | '/app/areas'
     | '/app/audit'
+    | '/app/departments'
     | '/app/hours'
     | '/app/notifications'
     | '/app/requests'
@@ -296,6 +308,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAuditRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/departments': {
+      id: '/app/departments'
+      path: '/departments'
+      fullPath: '/app/departments'
+      preLoaderRoute: typeof AppDepartmentsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/hours': {
       id: '/app/hours'
       path: '/hours'
@@ -365,6 +384,7 @@ declare module '@tanstack/react-router' {
 interface AppRouteChildren {
   AppAreasRoute: typeof AppAreasRoute
   AppAuditRoute: typeof AppAuditRoute
+  AppDepartmentsRoute: typeof AppDepartmentsRoute
   AppHoursRoute: typeof AppHoursRoute
   AppNotificationsRoute: typeof AppNotificationsRoute
   AppRequestsRoute: typeof AppRequestsRoute
@@ -379,6 +399,7 @@ interface AppRouteChildren {
 const AppRouteChildren: AppRouteChildren = {
   AppAreasRoute: AppAreasRoute,
   AppAuditRoute: AppAuditRoute,
+  AppDepartmentsRoute: AppDepartmentsRoute,
   AppHoursRoute: AppHoursRoute,
   AppNotificationsRoute: AppNotificationsRoute,
   AppRequestsRoute: AppRequestsRoute,

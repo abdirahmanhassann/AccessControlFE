@@ -65,6 +65,54 @@ export type WorkAreaManager = {
   isPrimary: boolean;
 };
 
+export type Department = {
+  id: number;
+  siteId: number;
+  name: string;
+  description: string;
+  isActive: boolean;
+  siteName?: string;
+};
+
+export type DepartmentRoomMapping = {
+  id: number;
+  departmentId: number;
+  roomId: number;
+  departmentName?: string;
+  roomNumber?: string;
+  roomName?: string;
+};
+
+export type DepartmentWorkerMapping = {
+  id: number;
+  departmentId: number;
+  workerId: number;
+  departmentName?: string;
+  workerFirstName?: string;
+  workerLastName?: string;
+};
+
+export type DepartmentManagerMapping = {
+  id: number;
+  departmentId: number;
+  userId: number;
+  isPrimary: boolean;
+  departmentName?: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+  role?: string;
+};
+
+export type WorkerSiteMapping = {
+  id: number;
+  workerId: number;
+  siteId: number;
+  workerFirstName?: string;
+  workerLastName?: string;
+  siteName?: string;
+};
+
 export type AccessWindow = {
   id: number;
   workAreaId: number;

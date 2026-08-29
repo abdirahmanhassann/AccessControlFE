@@ -404,7 +404,7 @@ function FormStep() {
   useEffect(() => {
     let cancelled = false;
     void api
-      .listManagers()
+      .listManagers(flow.room?.id)
       .then((rows) => {
         if (cancelled) return;
         setManagers(rows);
@@ -419,7 +419,7 @@ function FormStep() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [flow.room?.id]);
 
   useEffect(() => {
     if (flow.room?.id) return;

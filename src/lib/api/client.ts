@@ -8,6 +8,10 @@ import type {
   AccessWindow,
   AuditEvent,
   CreateUserRequest,
+  Department,
+  DepartmentManagerMapping,
+  DepartmentRoomMapping,
+  DepartmentWorkerMapping,
   LoginRequest,
   Notification,
   OTPVerification,
@@ -19,6 +23,7 @@ import type {
   WorkArea,
   WorkAreaManager,
   Worker,
+  WorkerSiteMapping,
 } from "./types";
 
 const DEFAULT_LIVE = "https://localhost:7105";
@@ -531,7 +536,14 @@ export const api = {
     asArray<unknown>(await post("/Access/getusers", { token }))
       .map((row) => asUserRow(row))
       .filter((row) => row.id),
-  listManagers: async () => {
+  listManagers: async (roomId?: number) => {
+    if (roomId) {
+      return asArray<unknown>(
+        await post("/Access/getmanagersforroom", { roomId, RoomId: roomId }),
+      )
+        .map((row) => asUserRow(row))
+        .filter((row) => row.id && row.isActive !== false);
+    }
     const token = readWorkerSession()?.token || readSession()?.token || "";
     const users = asArray<unknown>(await post("/Access/getusers", { token }))
       .map((row) => asUserRow(row))
@@ -549,6 +561,49 @@ export const api = {
     post<WorkAreaManager | null>("/Access/insertworkareamanager", { token, ...data }),
   updateWorkAreaManager: (token: string, data: WorkAreaManager) =>
     post<WorkAreaManager | null>("/Access/updateworkareamanager", { token, ...data }),
+
+  getDepartments: (token: string) =>
+    post<Department[]>("/Access/getdepartments", { token }).then(asArray<Department>),
+  insertDepartment: (token: string, data: { siteId: number; name: string; description?: string }) =>
+    post("/Access/insertdepartment", dual({ token, ...data })),
+  updateDepartment: (token: string, data: Department) =>
+    post("/Access/updatedepartment", dual({ token, ...data })),
+
+  getDepartmentRoomMappings: (token: string) =>
+    post<DepartmentRoomMapping[]>("/Access/getdepartmentroommappings", { token }).then(
+      asArray<DepartmentRoomMapping>,
+    ),
+  insertDepartmentRoomMapping: (token: string, data: { departmentId: number; roomId: number }) =>
+    post("/Access/insertdepartmentroommapping", dual({ token, ...data })),
+  deleteDepartmentRoomMapping: (token: string, id: number) =>
+    post("/Access/deletedepartmentroommapping", dual({ token, id })),
+
+  getDepartmentWorkerMappings: (token: string) =>
+    post<DepartmentWorkerMapping[]>("/Access/getdepartmentworkermappings", { token }).then(
+      asArray<DepartmentWorkerMapping>,
+    ),
+  insertDepartmentWorkerMapping: (token: string, data: { departmentId: number; workerId: number }) =>
+    post("/Access/insertdepartmentworkermapping", dual({ token, ...data })),
+  deleteDepartmentWorkerMapping: (token: string, id: number) =>
+    post("/Access/deletedepartmentworkermapping", dual({ token, id })),
+
+  getDepartmentManagerMappings: (token: string) =>
+    post<DepartmentManagerMapping[]>("/Access/getdepartmentmanagermappings", { token }).then(
+      asArray<DepartmentManagerMapping>,
+    ),
+  insertDepartmentManagerMapping: (
+    token: string,
+    data: { departmentId: number; userId: number; isPrimary?: boolean },
+  ) => post("/Access/insertdepartmentmanagermapping", dual({ token, ...data, isPrimary: data.isPrimary ?? false })),
+  deleteDepartmentManagerMapping: (token: string, id: number) =>
+    post("/Access/deletedepartmentmanagermapping", dual({ token, id })),
+
+  getWorkerSiteMappings: (token: string) =>
+    post<WorkerSiteMapping[]>("/Access/getworkersitemappings", { token }).then(asArray<WorkerSiteMapping>),
+  insertWorkerSiteMapping: (token: string, data: { workerId: number; siteId: number }) =>
+    post("/Access/insertworkersitemapping", dual({ token, ...data })),
+  deleteWorkerSiteMapping: (token: string, id: number) =>
+    post("/Access/deleteworkersitemapping", dual({ token, id })),
 
   getWorkers: async (token: string) =>
     asArray<unknown>(await post("/Access/getworkers", { token }))
