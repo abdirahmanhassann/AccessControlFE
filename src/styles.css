@@ -1060,6 +1060,9 @@
   .sg-main-bar .sg-muted {
     display: none;
   }
+  .sg-main-bar .sg-btn {
+    display: inline-flex;
+  }
   .sg-content {
     padding: 16px;
   }

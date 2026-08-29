@@ -783,7 +783,7 @@ const handlers: Record<string, (body: Body) => unknown> = {
   },
 
   "/Access/getusers": (body) => {
-    requireStaff(body as { token?: string });
+    requireSession(body as { token?: string });
     return load().users.map(publicUser);
   },
   "/Access/insertuser": (body) => {
@@ -1019,9 +1019,22 @@ const handlers: Record<string, (body: Body) => unknown> = {
     };
     db.requests.unshift(req);
     const area = db.workAreas.find((w) => w.id === room.workAreaId);
-    for (const mgr of managersForWorkArea(room.workAreaId)) {
+    const chosenId = Number(body.approverUserId);
+    const assigned =
+      (chosenId ? db.users.find((u) => u.id === chosenId) : undefined) ??
+      managersForWorkArea(room.workAreaId)[0];
+    if (assigned) {
+      db.approvals.unshift({
+        id: nextId(db, "approvals"),
+        accessRequestId: req.id,
+        approverUserId: assigned.id,
+        status: "Pending",
+        comment: "",
+        createdAt: iso(),
+        reviewedAt: null,
+      });
       notify({
-        userId: mgr.id,
+        userId: assigned.id,
         workerId: worker.id,
         accessRequestId: req.id,
         type: "NewRequest",
@@ -1092,19 +1105,26 @@ const handlers: Record<string, (body: Body) => unknown> = {
       .sort((a, b) => String(b.reviewedAt || b.createdAt).localeCompare(String(a.reviewedAt || a.createdAt)));
   },
   "/Access/insertaccessrequestapproval": (body) => {
-    const session = requireStaff(body as { token?: string });
+    const session = requireSession(body as { token?: string });
     const db = load();
     const req = db.requests.find((r) => r.id === Number(body.accessRequestId));
     if (!req) throw new ApiError(404, "Request not found.");
     const status = String(body.status ?? "Pending");
+    const approverUserId = Number(body.approverUserId ?? session.user.id);
+    const existing = db.approvals.find(
+      (a) => a.accessRequestId === req.id && a.approverUserId === approverUserId,
+    );
+    if (existing && /^pending$/i.test(String(existing.status)) && /^pending$/i.test(status)) {
+      return existing;
+    }
     const row: AccessRequestApproval = {
       id: nextId(db, "approvals"),
       accessRequestId: req.id,
-      approverUserId: Number(body.approverUserId ?? session.user.id),
+      approverUserId,
       status,
       comment: String(body.comment ?? ""),
       createdAt: iso(),
-      reviewedAt: iso(),
+      reviewedAt: /^pending$/i.test(status) ? null : iso(),
     };
     db.approvals.unshift(row);
     const worker = db.workers.find((w) => w.id === req.workerId);

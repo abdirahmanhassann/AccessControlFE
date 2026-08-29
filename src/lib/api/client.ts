@@ -1,6 +1,6 @@
 import { ApiError } from "./types";
 import { mockHandle } from "./mock";
-import { readSession } from "@/lib/session";
+import { readSession, readWorkerSession } from "@/lib/session";
 import type {
   AccessPhoto,
   AccessRequest,
@@ -250,6 +250,21 @@ function asRoom(data: unknown): ScanQrResult {
     siteName: pickStr(row, ["siteName"]),
     siteId: pickNum(row, ["siteId"]),
     siteAddress: pickStr(row, ["siteAddress"]),
+  };
+}
+
+function asAudit(data: unknown): AuditEvent {
+  const row = coerceRow(data);
+  return {
+    id: pickNum(row, ["id"]),
+    accessRequestId: pickNum(row, ["accessRequestId"]) || null,
+    workerId: pickNum(row, ["workerId"]) || null,
+    userId: pickNum(row, ["userId"]) || null,
+    eventType: pickStr(row, ["eventType"]),
+    description: pickStr(row, ["description"]),
+    ipAddress: pickStr(row, ["ipAddress"]),
+    metadata: pickStr(row, ["metadata"]),
+    createdAt: pickStr(row, ["createdAt"]) || pickDate(row, ["createdAt"]) || "",
   };
 }
 
@@ -516,6 +531,14 @@ export const api = {
     asArray<unknown>(await post("/Access/getusers", { token }))
       .map((row) => asUserRow(row))
       .filter((row) => row.id),
+  listManagers: async () => {
+    const token = readWorkerSession()?.token || readSession()?.token || "";
+    const users = asArray<unknown>(await post("/Access/getusers", { token }))
+      .map((row) => asUserRow(row))
+      .filter((row) => row.id && row.isActive !== false);
+    const managers = users.filter((u) => /^(admin|sitemanager|manager)$/i.test(String(u.role)));
+    return managers.length ? managers : users;
+  },
   insertUser: (token: string, data: Partial<User>) =>
     post<User | null>("/Access/insertuser", { token, ...data }),
   updateUser: (token: string, data: User) => post<User | null>("/Access/updateuser", { token, ...data }),
@@ -567,6 +590,7 @@ export const api = {
     workType: string;
     description: string;
     qrCodeIdentifier?: string;
+    approverUserId?: number;
   }) => {
     const roomId = num(data.roomId);
     const workerId = num(data.workerId);
@@ -590,6 +614,11 @@ export const api = {
     if (data.qrCodeIdentifier) {
       payload.qrCodeIdentifier = data.qrCodeIdentifier;
       payload.QrCodeIdentifier = data.qrCodeIdentifier;
+    }
+    const approverUserId = num(data.approverUserId);
+    if (approverUserId) {
+      payload.approverUserId = approverUserId;
+      payload.ApproverUserId = approverUserId;
     }
     return asRequest(await post<unknown>("/Access/insertaccessrequest", payload), {
       ...data,
@@ -708,10 +737,24 @@ export const api = {
   updateNotification: (token: string, data: Partial<Notification> & { id: number }) =>
     post<Notification | null>("/Access/updatenotification", { token, ...data }),
 
-  getAudits: (token: string) =>
-    post<AuditEvent[]>("/Access/getauditevents", { token }).then(asArray<AuditEvent>),
+  getAudits: async (token: string) =>
+    asArray<unknown>(await post("/Access/getauditevents", { token }))
+      .map((row) => asAudit(row))
+      .filter((row) => row.id || row.eventType),
   insertAudit: (token: string, data: Partial<AuditEvent>) =>
-    post<AuditEvent | null>("/Access/insertauditevent", { token, ...data }),
+    post<AuditEvent | null>(
+      "/Access/insertauditevent",
+      dual({
+        token,
+        accessRequestId: data.accessRequestId ?? null,
+        workerId: data.workerId ?? null,
+        userId: data.userId ?? null,
+        eventType: data.eventType ?? "Note",
+        description: data.description ?? "",
+        ipAddress: data.ipAddress ?? "",
+        metadata: data.metadata ?? "",
+      }),
+    ),
 };
 
 export function normalizeLogin(result: LoginResult | string): Session {

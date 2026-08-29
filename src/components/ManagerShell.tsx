@@ -127,7 +127,12 @@ export function ManagerShell({ children }: { children?: ReactNode }) {
             {open ? <X size={18} /> : <Menu size={18} />}
           </button>
           <h1>{title}</h1>
-          <span className="sg-muted">{session.user.email}</span>
+          <div className="sg-actions">
+            <span className="sg-muted">{session.user.email}</span>
+            <Button size="sm" onClick={signOut}>
+              <LogOut size={14} /> Sign out
+            </Button>
+          </div>
         </header>
         {children ?? <Outlet />}
       </div>

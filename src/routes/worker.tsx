@@ -5,6 +5,7 @@ import {
   Check,
   Clock3,
   Hourglass,
+  LogOut,
   QrCode,
   ShieldAlert,
   X,
@@ -12,9 +13,9 @@ import {
 import { BrandMark, Button, Field, Input, Select, Textarea, toast } from "@/components/ui";
 import { QrImage } from "@/components/QrImage";
 import { api, USE_MOCK } from "@/lib/api/client";
-import { ApiError, PHOTO_TYPES, WORK_TYPES, type Room } from "@/lib/api/types";
+import { ApiError, PHOTO_TYPES, WORK_TYPES, type Room, type User } from "@/lib/api/types";
 import { compressImage } from "@/lib/image";
-import { writeWorkerSession, readWorkerSession, readSession } from "@/lib/session";
+import { writeWorkerSession, readWorkerSession, readSession, clearWorkerSession } from "@/lib/session";
 import { useWorkerFlow } from "@/lib/worker-flow";
 import { prettyPhone, whenExact } from "@/lib/format";
 import { useMounted } from "@/lib/use-mounted";
@@ -66,9 +67,20 @@ function WorkerPage() {
     <div className="sg-worker">
       <header className="sg-worker-bar">
         <BrandMark />
-        <button className="sg-btn sg-btn-ghost sg-btn-sm" onClick={() => flow.reset()}>
-          Start over
-        </button>
+        <div className="sg-actions">
+          <button className="sg-btn sg-btn-ghost sg-btn-sm" onClick={() => flow.reset()}>
+            Start over
+          </button>
+          <button
+            className="sg-btn sg-btn-ghost sg-btn-sm"
+            onClick={() => {
+              clearWorkerSession();
+              flow.reset();
+            }}
+          >
+            <LogOut size={14} /> Sign out
+          </button>
+        </div>
       </header>
       <main className="sg-worker-main">
         <div className="sg-progress" aria-hidden="true">
@@ -383,9 +395,31 @@ function FormStep() {
     workType: WORK_TYPES[0],
     reason: "First fix",
     description: "",
+    approverUserId: "",
   });
+  const [managers, setManagers] = useState<User[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    void api
+      .listManagers()
+      .then((rows) => {
+        if (cancelled) return;
+        setManagers(rows);
+        if (rows[0] && !form.approverUserId) {
+          setForm((prev) => ({ ...prev, approverUserId: String(rows[0].id) }));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setManagers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     if (flow.room?.id) return;
@@ -427,6 +461,11 @@ function FormStep() {
       setError("Room is missing. Go back and scan a QR that exists in AccessControl.");
       return;
     }
+    const approverUserId = Number(form.approverUserId);
+    if (!approverUserId) {
+      setError("Choose the manager who should approve this request.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
@@ -458,9 +497,35 @@ function FormStep() {
         workType: form.workType,
         description: form.description,
         qrCodeIdentifier: qr || flow.room?.qrCodeIdentifier,
+        approverUserId,
       });
+      const token = readWorkerSession()?.token;
+      if (token && request.id) {
+        try {
+          await api.insertApproval(token, {
+            accessRequestId: request.id,
+            approverUserId,
+            status: "Pending",
+            comment: "",
+          });
+        } catch {
+          /* backend may already insert the pending approval */
+        }
+        try {
+          const manager = managers.find((m) => m.id === approverUserId);
+          await api.insertAudit(token, {
+            accessRequestId: request.id,
+            workerId: worker.id,
+            eventType: "AccessRequested",
+            description: `${worker.firstName} ${worker.lastName} submitted access for ${flow.room?.roomNumber || "room"} to ${manager ? `${manager.firstName} ${manager.lastName}` : `manager #${approverUserId}`}.`,
+            metadata: JSON.stringify({ approverUserId, roomId }),
+          });
+        } catch {
+          /* audit is best-effort */
+        }
+      }
       flow.set({ worker, request, mode: "waiting", step: "waiting" });
-      toast("Request sent to the site manager");
+      toast("Request sent to the chosen manager");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not submit.");
     } finally {
@@ -508,7 +573,24 @@ function FormStep() {
           required
         />
       </Field>
-      <Button variant="primary" block disabled={busy} type="submit">
+      <Field
+        label="Manager to approve"
+        hint={managers.length ? "This manager gets the pending approval." : "No managers loaded from Users."}
+      >
+        <Select
+          value={form.approverUserId}
+          onChange={(e) => setForm({ ...form, approverUserId: e.target.value })}
+          required
+        >
+          <option value="">Select a manager</option>
+          {managers.map((m) => (
+            <option key={m.id} value={m.id}>
+              {`${m.firstName} ${m.lastName}`.trim() || m.email} {m.role ? `· ${m.role}` : ""}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Button variant="primary" block disabled={busy || !form.approverUserId} type="submit">
         {busy ? "Submitting…" : "Send for approval"}
       </Button>
     </form>
