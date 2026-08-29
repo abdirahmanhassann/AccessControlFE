@@ -560,11 +560,7 @@ export const api = {
         }),
       )
         .map((row) => asUserRow(row))
-        .filter((row) => {
-          if (!row.id || row.isActive === false) return false;
-          if (departmentId && row.departmentId && row.departmentId !== departmentId) return false;
-          return true;
-        });
+        .filter((row) => row.id && row.isActive !== false);
     }
     const token = readWorkerSession()?.token || readSession()?.token || "";
     const users = asArray<unknown>(await post("/Access/getusers", { token }))
@@ -785,18 +781,13 @@ export const api = {
     }),
   verifyOtp: async (code: number) => {
     const data = await post<unknown>("/Access/verifyotp", { code });
-    const row = isPlainObject(data) ? data : {};
-    const worker =
-      row.worker && isPlainObject(row.worker)
-        ? (row.worker as unknown as Worker)
-        : row.id && (row.firstName || row.phoneNumber)
-          ? (row as unknown as Worker)
-          : null;
+    const row = coerceRow(data);
+    const worker = row.id && (row.firstName || row.lastName || row.phoneNumber) ? asWorkerRow(row) : null;
     return {
       verified: true,
       token: String(row.token ?? ""),
       worker,
-      phoneNumber: String(row.phoneNumber ?? ""),
+      phoneNumber: String(row.phoneNumber ?? row.workerPhoneNumber ?? ""),
     };
   },
   updateOtp: (token: string, data: OTPVerification) =>

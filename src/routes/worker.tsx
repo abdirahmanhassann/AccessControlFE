@@ -302,15 +302,17 @@ function OtpStep() {
     setError("");
     try {
       const result = await api.verifyOtp(Number(code));
-      let worker = result.worker;
-      if (!worker) {
-        worker = await api.insertWorker({
-          phoneNumber: flow.phoneNumber,
-          firstName: "",
-          lastName: "",
-          companyName: "",
-        });
-      }
+      const worker = result.worker?.id
+        ? result.worker
+        : {
+            id: 0,
+            firstName: "",
+            lastName: "",
+            phoneNumber: result.phoneNumber || flow.phoneNumber,
+            companyName: "",
+            isActive: true,
+            createdAt: new Date().toISOString(),
+          };
       writeWorkerSession({
         token: result.token,
         user: {
