@@ -789,11 +789,14 @@ const handlers: Record<string, (body: Body) => unknown> = {
   "/Access/getmanagersforroom": (body) => {
     const room = load().rooms.find((r) => r.id === Number(body.roomId ?? body.RoomId));
     if (!room) return [];
-    return managersForWorkArea(room.workAreaId).map((u) => ({
-      ...publicUser(u),
-      departmentName: load().workAreas.find((a) => a.id === room.workAreaId)?.name,
-      departmentId: room.workAreaId,
-    }));
+    const departmentId = Number(body.departmentId ?? body.DepartmentId ?? 0);
+    return managersForWorkArea(room.workAreaId)
+      .filter(() => !departmentId || departmentId === room.workAreaId)
+      .map((u) => ({
+        ...publicUser(u),
+        departmentName: load().workAreas.find((a) => a.id === room.workAreaId)?.name,
+        departmentId: room.workAreaId,
+      }));
   },
   "/Access/getdepartmentsforroom": (body) => {
     const room = load().rooms.find((r) => r.id === Number(body.roomId ?? body.RoomId));

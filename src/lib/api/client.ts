@@ -550,13 +550,22 @@ export const api = {
     asArray<unknown>(await post("/Access/getusers", { token }))
       .map((row) => asUserRow(row))
       .filter((row) => row.id),
-  listManagers: async (roomId?: number) => {
+  listManagers: async (roomId?: number, departmentId?: number) => {
     if (roomId) {
       return asArray<unknown>(
-        await post("/Access/getmanagersforroom", { roomId, RoomId: roomId }),
+        await post("/Access/getmanagersforroom", {
+          roomId,
+          RoomId: roomId,
+          departmentId: departmentId ?? 0,
+          DepartmentId: departmentId ?? 0,
+        }),
       )
         .map((row) => asUserRow(row))
-        .filter((row) => row.id && row.isActive !== false);
+        .filter((row) => {
+          if (!row.id || row.isActive === false) return false;
+          if (departmentId && row.departmentId && row.departmentId !== departmentId) return false;
+          return true;
+        });
     }
     const token = readWorkerSession()?.token || readSession()?.token || "";
     const users = asArray<unknown>(await post("/Access/getusers", { token }))

@@ -393,6 +393,7 @@ function FormStep() {
     lastName: flow.worker?.lastName ?? "",
     companyName: flow.worker?.companyName ?? "",
     workType: "",
+    departmentId: 0,
     reason: "First fix",
     description: "",
     approverUserId: "",
@@ -406,37 +407,66 @@ function FormStep() {
     let cancelled = false;
     const roomId = flow.room?.id;
     if (!roomId) {
-      setManagers([]);
       setDepartments([]);
       return;
     }
-    void Promise.all([api.listManagers(roomId), api.listDepartmentsForRoom(roomId)])
-      .then(([managerRows, departmentRows]) => {
+    void api
+      .listDepartmentsForRoom(roomId)
+      .then((departmentRows) => {
         if (cancelled) return;
-        setManagers(managerRows);
         setDepartments(departmentRows);
-        setForm((prev) => ({
-          ...prev,
-          workType: prev.workType || departmentRows[0]?.name || "",
-          approverUserId:
-            prev.approverUserId ||
-            String(
-              managerRows.find((m) => !departmentRows[0] || m.departmentName === departmentRows[0].name)?.id ||
-                managerRows[0]?.id ||
-                "",
-            ),
-        }));
+        setForm((prev) => {
+          const selected =
+            departmentRows.find((d) => d.id === prev.departmentId) ?? departmentRows[0];
+          return {
+            ...prev,
+            departmentId: selected?.id ?? 0,
+            workType: selected?.name ?? "",
+          };
+        });
       })
       .catch(() => {
-        if (cancelled) return;
-        setManagers([]);
-        setDepartments([]);
+        if (!cancelled) setDepartments([]);
       });
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flow.room?.id]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const roomId = flow.room?.id;
+    const departmentId = form.departmentId;
+    if (!roomId || !departmentId) {
+      setManagers([]);
+      return;
+    }
+    void api
+      .listManagers(roomId, departmentId)
+      .then((managerRows) => {
+        if (cancelled) return;
+        const forDepartment = managerRows.filter(
+          (m) => !m.departmentId || m.departmentId === departmentId,
+        );
+        setManagers(forDepartment);
+        setForm((prev) => ({
+          ...prev,
+          approverUserId: forDepartment.some((m) => String(m.id) === prev.approverUserId)
+            ? prev.approverUserId
+            : forDepartment[0]
+              ? String(forDepartment[0].id)
+              : "",
+        }));
+      })
+      .catch(() => {
+        if (!cancelled) setManagers([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flow.room?.id, form.departmentId]);
 
   useEffect(() => {
     if (flow.room?.id) return;
@@ -483,8 +513,12 @@ function FormStep() {
       setError("Choose the manager who should approve this request.");
       return;
     }
-    if (!form.workType) {
+    if (!form.workType || !form.departmentId) {
       setError("Choose a department for this room.");
+      return;
+    }
+    if (!departmentManagers.some((m) => m.id === approverUserId)) {
+      setError("Choose a manager from the selected department.");
       return;
     }
     setBusy(true);
@@ -554,16 +588,9 @@ function FormStep() {
     }
   }
 
-  const departmentManagers = managers.filter((m, index) => {
-    if (form.workType && m.departmentName && m.departmentName !== form.workType) return false;
-    return (
-      managers.findIndex(
-        (other) =>
-          other.id === m.id &&
-          (!form.workType || !other.departmentName || other.departmentName === form.workType),
-      ) === index
-    );
-  });
+  const departmentManagers = form.departmentId
+    ? managers.filter((m) => !m.departmentId || m.departmentId === form.departmentId)
+    : [];
 
   return (
     <form onSubmit={submit} className="sg-form-grid">
@@ -597,21 +624,22 @@ function FormStep() {
         }
       >
         <Select
-          value={form.workType}
+          value={form.departmentId ? String(form.departmentId) : ""}
           onChange={(e) => {
-            const workType = e.target.value;
-            const match = managers.find((m) => m.departmentName === workType);
+            const departmentId = Number(e.target.value);
+            const dept = departments.find((d) => d.id === departmentId);
             setForm({
               ...form,
-              workType,
-              approverUserId: match ? String(match.id) : form.approverUserId,
+              departmentId,
+              workType: dept?.name ?? "",
+              approverUserId: "",
             });
           }}
           required
         >
           <option value="">Select department</option>
           {departments.map((d) => (
-            <option key={d.id} value={d.name}>
+            <option key={d.id} value={d.id}>
               {d.name}
             </option>
           ))}
