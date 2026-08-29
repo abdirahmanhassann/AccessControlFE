@@ -284,6 +284,20 @@ function asUserRow(data: unknown): User {
     role: pickStr(row, ["role"]) || "Manager",
     isActive: row.isActive !== false && row.IsActive !== false,
     createdAt: pickStr(row, ["createdAt"]) || new Date().toISOString(),
+    departmentId: pickNum(row, ["departmentId"]) || undefined,
+    departmentName: pickStr(row, ["departmentName"]) || undefined,
+  };
+}
+
+function asDepartment(data: unknown): Department {
+  const row = coerceRow(data);
+  return {
+    id: pickNum(row, ["id", "departmentId"]),
+    siteId: pickNum(row, ["siteId"]),
+    name: pickStr(row, ["name", "departmentName"]),
+    description: pickStr(row, ["description"]),
+    isActive: row.isActive !== false && row.IsActive !== false,
+    siteName: pickStr(row, ["siteName"]),
   };
 }
 
@@ -563,7 +577,11 @@ export const api = {
     post<WorkAreaManager | null>("/Access/updateworkareamanager", { token, ...data }),
 
   getDepartments: (token: string) =>
-    post<Department[]>("/Access/getdepartments", { token }).then(asArray<Department>),
+    post("/Access/getdepartments", { token }).then((data) => asArray<unknown>(data).map(asDepartment)),
+  listDepartmentsForRoom: async (roomId: number) =>
+    asArray<unknown>(await post("/Access/getdepartmentsforroom", { roomId, RoomId: roomId }))
+      .map(asDepartment)
+      .filter((d) => d.id && d.name && d.isActive !== false),
   insertDepartment: (token: string, data: { siteId: number; name: string; description?: string }) =>
     post("/Access/insertdepartment", dual({ token, ...data })),
   updateDepartment: (token: string, data: Department) =>

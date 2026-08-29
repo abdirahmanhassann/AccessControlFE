@@ -13,7 +13,7 @@ import {
 import { BrandMark, Button, Field, Input, Select, Textarea, toast } from "@/components/ui";
 import { QrImage } from "@/components/QrImage";
 import { api, USE_MOCK } from "@/lib/api/client";
-import { ApiError, PHOTO_TYPES, WORK_TYPES, type Room, type User } from "@/lib/api/types";
+import { ApiError, PHOTO_TYPES, type Department, type Room, type User } from "@/lib/api/types";
 import { compressImage } from "@/lib/image";
 import { writeWorkerSession, readWorkerSession, readSession, clearWorkerSession } from "@/lib/session";
 import { useWorkerFlow } from "@/lib/worker-flow";
@@ -392,28 +392,45 @@ function FormStep() {
     firstName: flow.worker?.firstName ?? "",
     lastName: flow.worker?.lastName ?? "",
     companyName: flow.worker?.companyName ?? "",
-    workType: WORK_TYPES[0],
+    workType: "",
     reason: "First fix",
     description: "",
     approverUserId: "",
   });
   const [managers, setManagers] = useState<User[]>([]);
+  const [departments, setDepartments] = useState<Department[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
-    void api
-      .listManagers(flow.room?.id)
-      .then((rows) => {
+    const roomId = flow.room?.id;
+    if (!roomId) {
+      setManagers([]);
+      setDepartments([]);
+      return;
+    }
+    void Promise.all([api.listManagers(roomId), api.listDepartmentsForRoom(roomId)])
+      .then(([managerRows, departmentRows]) => {
         if (cancelled) return;
-        setManagers(rows);
-        if (rows[0] && !form.approverUserId) {
-          setForm((prev) => ({ ...prev, approverUserId: String(rows[0].id) }));
-        }
+        setManagers(managerRows);
+        setDepartments(departmentRows);
+        setForm((prev) => ({
+          ...prev,
+          workType: prev.workType || departmentRows[0]?.name || "",
+          approverUserId:
+            prev.approverUserId ||
+            String(
+              managerRows.find((m) => !departmentRows[0] || m.departmentName === departmentRows[0].name)?.id ||
+                managerRows[0]?.id ||
+                "",
+            ),
+        }));
       })
       .catch(() => {
-        if (!cancelled) setManagers([]);
+        if (cancelled) return;
+        setManagers([]);
+        setDepartments([]);
       });
     return () => {
       cancelled = true;
@@ -464,6 +481,10 @@ function FormStep() {
     const approverUserId = Number(form.approverUserId);
     if (!approverUserId) {
       setError("Choose the manager who should approve this request.");
+      return;
+    }
+    if (!form.workType) {
+      setError("Choose a department for this room.");
       return;
     }
     setBusy(true);
@@ -533,6 +554,17 @@ function FormStep() {
     }
   }
 
+  const departmentManagers = managers.filter((m, index) => {
+    if (form.workType && m.departmentName && m.departmentName !== form.workType) return false;
+    return (
+      managers.findIndex(
+        (other) =>
+          other.id === m.id &&
+          (!form.workType || !other.departmentName || other.departmentName === form.workType),
+      ) === index
+    );
+  });
+
   return (
     <form onSubmit={submit} className="sg-form-grid">
       <h1>Access request</h1>
@@ -556,10 +588,32 @@ function FormStep() {
       <Field label="Company">
         <Input value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} required />
       </Field>
-      <Field label="Work type">
-        <Select value={form.workType} onChange={(e) => setForm({ ...form, workType: e.target.value })}>
-          {WORK_TYPES.map((w) => (
-            <option key={w}>{w}</option>
+      <Field
+        label="Work type"
+        hint={
+          departments.length
+            ? "Departments assigned to this room."
+            : "No departments are mapped to this room yet."
+        }
+      >
+        <Select
+          value={form.workType}
+          onChange={(e) => {
+            const workType = e.target.value;
+            const match = managers.find((m) => m.departmentName === workType);
+            setForm({
+              ...form,
+              workType,
+              approverUserId: match ? String(match.id) : form.approverUserId,
+            });
+          }}
+          required
+        >
+          <option value="">Select department</option>
+          {departments.map((d) => (
+            <option key={d.id} value={d.name}>
+              {d.name}
+            </option>
           ))}
         </Select>
       </Field>
@@ -575,7 +629,13 @@ function FormStep() {
       </Field>
       <Field
         label="Manager to approve"
-        hint={managers.length ? "This manager gets the pending approval." : "No managers loaded from Users."}
+        hint={
+          departmentManagers.length
+            ? "Managers for the selected department."
+            : departments.length
+              ? "No manager is mapped to that department."
+              : "No managers loaded for this room."
+        }
       >
         <Select
           value={form.approverUserId}
@@ -583,8 +643,8 @@ function FormStep() {
           required
         >
           <option value="">Select a manager</option>
-          {managers.map((m) => (
-            <option key={m.id} value={m.id}>
+          {departmentManagers.map((m) => (
+            <option key={`${m.id}-${m.departmentId ?? m.departmentName ?? ""}`} value={m.id}>
               {`${m.firstName} ${m.lastName}`.trim() || m.email} {m.role ? `· ${m.role}` : ""}
             </option>
           ))}

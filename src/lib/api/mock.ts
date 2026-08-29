@@ -789,7 +789,26 @@ const handlers: Record<string, (body: Body) => unknown> = {
   "/Access/getmanagersforroom": (body) => {
     const room = load().rooms.find((r) => r.id === Number(body.roomId ?? body.RoomId));
     if (!room) return [];
-    return managersForWorkArea(room.workAreaId).map(publicUser);
+    return managersForWorkArea(room.workAreaId).map((u) => ({
+      ...publicUser(u),
+      departmentName: load().workAreas.find((a) => a.id === room.workAreaId)?.name,
+      departmentId: room.workAreaId,
+    }));
+  },
+  "/Access/getdepartmentsforroom": (body) => {
+    const room = load().rooms.find((r) => r.id === Number(body.roomId ?? body.RoomId));
+    if (!room) return [];
+    const area = load().workAreas.find((a) => a.id === room.workAreaId);
+    if (!area) return [];
+    return [
+      {
+        id: area.id,
+        siteId: area.siteId,
+        name: area.name,
+        description: area.description,
+        isActive: area.isActive,
+      },
+    ];
   },
   "/Access/insertuser": (body) => {
     requireStaff(body as { token?: string });

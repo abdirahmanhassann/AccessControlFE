@@ -20,6 +20,8 @@ export type User = {
   role: Role | string;
   isActive: boolean;
   createdAt: string;
+  departmentId?: number;
+  departmentName?: string;
 };
 
 export type Site = {
