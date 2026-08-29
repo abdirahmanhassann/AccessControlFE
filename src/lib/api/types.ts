@@ -85,15 +85,6 @@ export type DepartmentRoomMapping = {
   roomName?: string;
 };
 
-export type DepartmentWorkerMapping = {
-  id: number;
-  departmentId: number;
-  workerId: number;
-  departmentName?: string;
-  workerFirstName?: string;
-  workerLastName?: string;
-};
-
 export type DepartmentManagerMapping = {
   id: number;
   departmentId: number;

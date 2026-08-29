@@ -11,7 +11,6 @@ import type {
   Department,
   DepartmentManagerMapping,
   DepartmentRoomMapping,
-  DepartmentWorkerMapping,
   LoginRequest,
   Notification,
   OTPVerification,
@@ -604,15 +603,6 @@ export const api = {
     post("/Access/insertdepartmentroommapping", dual({ token, ...data })),
   deleteDepartmentRoomMapping: (token: string, id: number) =>
     post("/Access/deletedepartmentroommapping", dual({ token, id })),
-
-  getDepartmentWorkerMappings: (token: string) =>
-    post<DepartmentWorkerMapping[]>("/Access/getdepartmentworkermappings", { token }).then(
-      asArray<DepartmentWorkerMapping>,
-    ),
-  insertDepartmentWorkerMapping: (token: string, data: { departmentId: number; workerId: number }) =>
-    post("/Access/insertdepartmentworkermapping", dual({ token, ...data })),
-  deleteDepartmentWorkerMapping: (token: string, id: number) =>
-    post("/Access/deletedepartmentworkermapping", dual({ token, id })),
 
   getDepartmentManagerMappings: (token: string) =>
     post<DepartmentManagerMapping[]>("/Access/getdepartmentmanagermappings", { token }).then(

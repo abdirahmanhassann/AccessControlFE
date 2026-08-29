@@ -9,7 +9,6 @@ import type {
   Department,
   DepartmentManagerMapping,
   DepartmentRoomMapping,
-  DepartmentWorkerMapping,
 } from "@/lib/api/types";
 
 export const Route = createFileRoute("/app/departments")({ component: DepartmentsPage });
@@ -19,7 +18,6 @@ function DepartmentsPage() {
   const [token, setToken] = useState<string>();
   const [departments, setDepartments] = useState<Department[]>([]);
   const [roomsMap, setRoomsMap] = useState<DepartmentRoomMapping[]>([]);
-  const [workersMap, setWorkersMap] = useState<DepartmentWorkerMapping[]>([]);
   const [managersMap, setManagersMap] = useState<DepartmentManagerMapping[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -27,15 +25,13 @@ function DepartmentsPage() {
   const { data, loading } = useStaffData(token);
 
   async function reloadMaps(t: string) {
-    const [deps, rooms, workers, managers] = await Promise.all([
+    const [deps, rooms, managers] = await Promise.all([
       api.getDepartments(t),
       api.getDepartmentRoomMappings(t),
-      api.getDepartmentWorkerMappings(t),
       api.getDepartmentManagerMappings(t),
     ]);
     setDepartments(deps);
     setRoomsMap(rooms);
-    setWorkersMap(workers);
     setManagersMap(managers);
     if (selected == null && deps[0]) setSelected(deps[0].id);
   }
@@ -48,18 +44,16 @@ function DepartmentsPage() {
 
   const dept = departments.find((d) => d.id === selected) ?? null;
   const rooms = useMemo(() => roomsMap.filter((m) => m.departmentId === selected), [roomsMap, selected]);
-  const workers = useMemo(() => workersMap.filter((m) => m.departmentId === selected), [workersMap, selected]);
   const managers = useMemo(() => managersMap.filter((m) => m.departmentId === selected), [managersMap, selected]);
 
   if (!mounted || loading || !data) return <PageSkeleton />;
 
-  async function add(kind: "room" | "worker" | "manager", value: number) {
+  async function add(kind: "room" | "manager", value: number) {
     const t = readSession()?.token;
     if (!t || !selected || !value) return;
     setBusy(true);
     try {
       if (kind === "room") await api.insertDepartmentRoomMapping(t, { departmentId: selected, roomId: value });
-      if (kind === "worker") await api.insertDepartmentWorkerMapping(t, { departmentId: selected, workerId: value });
       if (kind === "manager") {
         await api.insertDepartmentManagerMapping(t, { departmentId: selected, userId: value, isPrimary: false });
       }
@@ -71,13 +65,12 @@ function DepartmentsPage() {
     }
   }
 
-  async function remove(kind: "room" | "worker" | "manager", id: number) {
+  async function remove(kind: "room" | "manager", id: number) {
     const t = readSession()?.token;
     if (!t) return;
     setBusy(true);
     try {
       if (kind === "room") await api.deleteDepartmentRoomMapping(t, id);
-      if (kind === "worker") await api.deleteDepartmentWorkerMapping(t, id);
       if (kind === "manager") await api.deleteDepartmentManagerMapping(t, id);
       await reloadMaps(t);
     } catch (err) {
@@ -92,7 +85,7 @@ function DepartmentsPage() {
       <p className="sg-muted">
         A manager only appears on the worker dropdown, and can only approve, when they are mapped to a
         department that owns the room <em>and</em> that department belongs to the room's site.
-        Workers must be mapped to that department and to the site.
+        Workers can request any room.
       </p>
       <div className="sg-toolbar">
         <Select value={String(selected ?? "")} onChange={(e) => setSelected(Number(e.target.value))}>
@@ -120,20 +113,6 @@ function DepartmentsPage() {
               .map((r) => ({ id: r.id, label: `${r.roomNumber} ${r.name}` }))}
             onAdd={(id) => add("room", id)}
             onRemove={(id) => remove("room", id)}
-            busy={busy}
-          />
-          <MappingBlock
-            title="Workers"
-            hint="Contractors who can request these rooms."
-            rows={workers.map((m) => ({
-              id: m.id,
-              label: `${m.workerFirstName ?? ""} ${m.workerLastName ?? ""}`.trim() || `Worker #${m.workerId}`,
-            }))}
-            options={data.workers
-              .filter((w) => !workers.some((m) => m.workerId === w.id))
-              .map((w) => ({ id: w.id, label: `${w.firstName} ${w.lastName}` }))}
-            onAdd={(id) => add("worker", id)}
-            onRemove={(id) => remove("worker", id)}
             busy={busy}
           />
           <MappingBlock
