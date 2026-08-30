@@ -30,11 +30,49 @@ const DEMO_ROOMS = [
 
 const STEPS = ["scan", "phone", "otp", "form", "waiting", "visit", "clockout", "done"] as const;
 
-function isOpenVisit(req: AccessRequest | null | undefined, roomId: number) {
-  if (!req || !roomId || req.roomId !== roomId) return false;
+function isOpenVisit(req: AccessRequest | null | undefined, roomId?: number) {
+  if (!req) return false;
   if (req.clockedOutAt || req.completedAt) return false;
   if (/^completed$/i.test(String(req.status))) return false;
-  return /^approved$/i.test(String(req.status));
+  if (!/^approved$/i.test(String(req.status))) return false;
+  if (roomId && req.roomId && req.roomId !== roomId) return false;
+  return true;
+}
+
+function digits(value: string | undefined) {
+  return (value || "").replace(/\D/g, "");
+}
+
+async function loadWorkerRequests(opts: {
+  token?: string;
+  workerId?: number;
+  roomId?: number;
+  phone?: string;
+}) {
+  const filters: Array<{ workerId?: number; roomId?: number; take: number }> = [];
+  if (opts.workerId) filters.push({ workerId: opts.workerId, roomId: opts.roomId || undefined, take: 50 });
+  if (opts.workerId) filters.push({ workerId: opts.workerId, take: 50 });
+  if (opts.roomId) filters.push({ roomId: opts.roomId, take: 50 });
+  const phone = digits(opts.phone);
+  const seen = new Set<number>();
+  const rows: AccessRequest[] = [];
+  for (const filter of filters) {
+    try {
+      const page = await api.getAccessRequests(opts.token, filter);
+      for (const row of page) {
+        if (!row.id || seen.has(row.id)) continue;
+        seen.add(row.id);
+        rows.push(row);
+      }
+    } catch {
+      /* try the next filter */
+    }
+  }
+  if (phone) {
+    const matched = rows.filter((r) => digits(r.phoneNumber || r.workerPhoneNumber) === phone);
+    if (matched.length) return matched;
+  }
+  return rows;
 }
 
 export const Route = createFileRoute("/worker")({
@@ -340,20 +378,16 @@ function OtpStep() {
       const session = readWorkerSession();
       const token = session?.token || result.token || "";
       const roomId = Number(flow.room?.id ?? (flow.room as { roomId?: number } | null)?.roomId ?? 0);
-      let requests: AccessRequest[] = [];
-      try {
-        requests = await api.getAccessRequests(token, {
-          workerId: worker.id || undefined,
-          roomId: roomId || undefined,
-          take: 20,
-        });
-      } catch {
-        requests = [];
-      }
+      const requests = await loadWorkerRequests({
+        token,
+        workerId: worker.id || undefined,
+        roomId: roomId || undefined,
+        phone: result.phoneNumber || flow.phoneNumber,
+      });
       const activePending = requests.find(
-        (r) => r.roomId === roomId && /^pending$/i.test(String(r.status)),
+        (r) => (!roomId || r.roomId === roomId) && /^pending$/i.test(String(r.status)),
       );
-      const openVisit = requests.find((r) => isOpenVisit(r, roomId));
+      const openVisit = requests.find((r) => isOpenVisit(r, roomId || undefined));
       if (activePending) {
         flow.set({ worker, request: activePending, mode: "waiting", step: "waiting" });
       } else if (openVisit) {
@@ -423,13 +457,17 @@ function FormStep() {
   useEffect(() => {
     const roomId = Number(flow.room?.id ?? 0);
     const workerId = flow.worker?.id;
-    if (!roomId || !workerId) return;
+    if (!roomId && !workerId) return;
     let cancelled = false;
-    void api
-      .getAccessRequests(readWorkerSession()?.token, { workerId, roomId, take: 20 })
+    void loadWorkerRequests({
+      token: readWorkerSession()?.token,
+      workerId,
+      roomId: roomId || undefined,
+      phone: flow.phoneNumber,
+    })
       .then((rows) => {
         if (cancelled) return;
-        const hit = rows.find((r) => isOpenVisit(r, roomId));
+        const hit = rows.find((r) => isOpenVisit(r, roomId || undefined));
         setOpenVisit(hit ?? null);
       })
       .catch(() => {

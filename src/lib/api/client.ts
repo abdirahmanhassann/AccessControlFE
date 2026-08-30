@@ -823,11 +823,23 @@ export const api = {
   verifyOtp: async (code: number) => {
     const data = await post<unknown>("/Access/verifyotp", { code });
     const row = coerceRow(data);
-    const worker = row.id && (row.firstName || row.lastName || row.phoneNumber) ? asWorkerRow(row) : null;
+    const workerId = pickNum(row, ["workerId", "id"]);
+    const hasWorkerFields = Boolean(
+      pickStr(row, ["firstName"]) ||
+        pickStr(row, ["lastName"]) ||
+        pickStr(row, ["companyName"]) ||
+        pickStr(row, ["workerPhoneNumber"]),
+    );
+    const worker =
+      workerId && (hasWorkerFields || pickStr(row, ["phoneNumber"]))
+        ? asWorkerRow(row)
+        : workerId
+          ? asWorkerRow({ ...row, id: workerId, workerId })
+          : null;
     return {
       verified: true,
       token: String(row.token ?? ""),
-      worker,
+      worker: worker?.id ? worker : null,
       phoneNumber: String(row.phoneNumber ?? row.workerPhoneNumber ?? ""),
     };
   },
