@@ -8,6 +8,7 @@ export type WorkerStep =
   | "otp"
   | "form"
   | "waiting"
+  | "visit"
   | "clockout"
   | "done";
 
@@ -20,7 +21,7 @@ type WorkerFlow = {
   otpExpiresAt: string | null;
   worker: Worker | null;
   request: AccessRequest | null;
-  mode: "request" | "clockout" | "waiting";
+  mode: "request" | "clockout" | "waiting" | "visit";
   set: (patch: Partial<Omit<WorkerFlow, "set" | "reset" | "startWithQr">>) => void;
   startWithQr: (qr: string) => void;
   reset: () => void;

@@ -734,7 +734,7 @@ export const api = {
     });
   },
   updateAccessRequest: (token: string, data: Partial<AccessRequest> & { id: number }) =>
-    post<AccessRequest | null>("/Access/updateaccessrequest", { token, ...data }),
+    post<AccessRequest | null>("/Access/updateaccessrequest", dual({ token, ...data })),
 
   getApprovals: async (token: string, filter?: ListFilter) =>
     asPagedList(

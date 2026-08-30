@@ -13,7 +13,7 @@ import {
 import { BrandMark, Button, Field, Input, Select, Textarea, toast } from "@/components/ui";
 import { QrImage } from "@/components/QrImage";
 import { api, USE_MOCK } from "@/lib/api/client";
-import { ApiError, PHOTO_TYPES, type Department, type Room, type User } from "@/lib/api/types";
+import { ApiError, PHOTO_TYPES, type AccessRequest, type Department, type Room, type User } from "@/lib/api/types";
 import { compressImage } from "@/lib/image";
 import { writeWorkerSession, readWorkerSession, readSession, clearWorkerSession } from "@/lib/session";
 import { useWorkerFlow } from "@/lib/worker-flow";
@@ -28,7 +28,19 @@ const DEMO_ROOMS = [
   { qr: "SG-OAK-NW04", room: "NW-04", name: "Plant corridor", site: "Oakridge Mixed-Use" },
 ];
 
-const STEPS = ["scan", "phone", "otp", "form", "waiting", "clockout", "done"] as const;
+const STEPS = ["scan", "phone", "otp", "form", "waiting", "visit", "clockout", "done"] as const;
+
+function isOpenVisit(req: AccessRequest | null | undefined, roomId: number) {
+  if (!req || !roomId || req.roomId !== roomId) return false;
+  if (!/^approved$/i.test(String(req.status))) return false;
+  if (req.clockedOutAt || req.completedAt) return false;
+  if (/^completed$/i.test(String(req.status))) return false;
+  if (req.expectedClockOutAt) {
+    const t = Date.parse(req.expectedClockOutAt);
+    if (Number.isFinite(t) && t < Date.now()) return false;
+  }
+  return true;
+}
 
 export const Route = createFileRoute("/worker")({
   validateSearch: (s: Record<string, unknown>): { qr?: string } =>
@@ -93,6 +105,7 @@ function WorkerPage() {
         {flow.step === "otp" && <OtpStep />}
         {flow.step === "form" && <FormStep />}
         {flow.step === "waiting" && <WaitingStep />}
+        {flow.step === "visit" && <VisitStep />}
         {flow.step === "clockout" && <ClockOutStep />}
         {flow.step === "done" && <DoneStep />}
       </main>
@@ -338,13 +351,14 @@ function OtpStep() {
           roomId: roomId || undefined,
           take: 20,
         });
-        const active = requests.find(
-          (r) => r.roomId === roomId && (r.status === "Pending" || r.status === "Approved"),
+        const activePending = requests.find(
+          (r) => r.roomId === roomId && /^pending$/i.test(String(r.status)),
         );
-        if (active?.status === "Pending") {
-          flow.set({ worker, request: active, mode: "waiting", step: "waiting" });
-        } else if (active?.status === "Approved") {
-          flow.set({ worker, request: active, mode: "clockout", step: "clockout" });
+        const openVisit = requests.find((r) => isOpenVisit(r, roomId));
+        if (activePending) {
+          flow.set({ worker, request: activePending, mode: "waiting", step: "waiting" });
+        } else if (openVisit) {
+          flow.set({ worker, request: openVisit, mode: "visit", step: "visit" });
         } else {
           flow.set({ worker, request: null, mode: "request", step: "form" });
         }
@@ -714,7 +728,7 @@ function WaitingStep() {
           const notes = await api.getNotifications(token!);
           const hit = notes.find((n) => n.accessRequestId === row.id && n.type === "Approved");
           setComment(hit?.message ?? "");
-          flow.set({ request: row, mode: "clockout", step: "clockout" });
+          flow.set({ request: row, mode: "visit", step: "visit" });
         }
         if (row.status === "Rejected") {
           const notes = await api.getNotifications(token!);
@@ -769,6 +783,101 @@ function WaitingStep() {
   );
 }
 
+function VisitStep() {
+  const flow = useWorkerFlow();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const clockedIn = Boolean(flow.request?.clockedInAt);
+  const expected = flow.request?.expectedClockOutAt;
+
+  async function clockIn() {
+    const session = readWorkerSession();
+    if (!session || !flow.request || !flow.worker?.id) {
+      setError("Worker details are missing. Verify OTP again.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const now = new Date();
+      const expectedOut =
+        flow.request.expectedClockOutAt || new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString();
+      await api.updateAccessRequest(session.token, {
+        id: flow.request.id,
+        workerId: flow.worker.id || flow.request.workerId,
+        roomId: flow.request.roomId,
+        status: "Approved",
+        reason: flow.request.reason,
+        workType: flow.request.workType,
+        description: flow.request.description,
+        clockedInAt: now.toISOString().slice(0, 19),
+        expectedClockOutAt: expectedOut.slice(0, 19),
+      });
+      try {
+        await api.insertAudit(session.token, {
+          accessRequestId: flow.request.id,
+          workerId: flow.worker.id,
+          eventType: "ClockedIn",
+          description: `${flow.worker.firstName} ${flow.worker.lastName} clocked in to ${flow.room?.roomNumber ?? "room"}.`,
+        });
+      } catch {
+        /* audit is best-effort */
+      }
+      flow.set({
+        request: {
+          ...flow.request,
+          clockedInAt: now.toISOString(),
+          expectedClockOutAt: expectedOut,
+        },
+      });
+      toast("Clocked in");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not clock in.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="sg-form-grid">
+      <h1>{clockedIn ? "You are on site" : "Approved visit"}</h1>
+      <p className="sg-muted">
+        {flow.room?.roomNumber} {flow.room?.name}. Clock in when you enter, then sign out when you
+        leave.
+      </p>
+      {flow.room ? (
+        <div className="sg-room-chip">
+          <strong>
+            {flow.room.roomNumber} {flow.room.name}
+          </strong>
+          <small>{flow.room.description}</small>
+        </div>
+      ) : null}
+      {clockedIn ? (
+        <div className="sg-room-chip">
+          <strong>Clocked in</strong>
+          <small>{whenExact(flow.request?.clockedInAt)}</small>
+        </div>
+      ) : null}
+      {expected ? <p className="sg-help">Expected clock out {whenExact(expected)}</p> : null}
+      {error ? <p className="sg-error">{error}</p> : null}
+      <Button variant="primary" block disabled={busy || clockedIn} onClick={() => void clockIn()}>
+        {busy ? "Clocking in…" : clockedIn ? "Already clocked in" : "Clock in"}
+      </Button>
+      <Button
+        block
+        disabled={busy}
+        onClick={() => flow.set({ mode: "clockout", step: "clockout" })}
+      >
+        Sign out
+      </Button>
+      <Button type="button" onClick={() => flow.set({ step: "form", request: null, mode: "request" })}>
+        New access request
+      </Button>
+    </div>
+  );
+}
+
 function ClockOutStep() {
   const flow = useWorkerFlow();
   const [photos, setPhotos] = useState<Array<{ dataUrl: string; name: string; size: number; type: string }>>([]);
@@ -789,10 +898,6 @@ function ClockOutStep() {
   async function finish() {
     const session = readWorkerSession();
     if (!session || !flow.request || !flow.worker) return;
-    if (!photos.length) {
-      setError("Take at least one photo of the room before you leave.");
-      return;
-    }
     setBusy(true);
     setError("");
     try {
@@ -811,21 +916,25 @@ function ClockOutStep() {
       const now = new Date().toISOString();
       await api.updateAccessRequest(session.token, {
         id: flow.request.id,
-        workerId: flow.request.workerId,
+        workerId: flow.worker.id || flow.request.workerId,
         roomId: flow.request.roomId,
         status: "Completed",
         reason: flow.request.reason,
         workType: flow.request.workType,
         description: flow.request.description,
-        clockedOutAt: now,
-        completedAt: now,
+        clockedOutAt: now.slice(0, 19),
+        completedAt: now.slice(0, 19),
       });
-      await api.insertAudit(session.token, {
-        accessRequestId: flow.request.id,
-        workerId: flow.worker.id,
-        eventType: "ClockedOut",
-        description: `${flow.worker.firstName} ${flow.worker.lastName} clocked out of ${flow.room?.roomNumber ?? "room"}.`,
-      });
+      try {
+        await api.insertAudit(session.token, {
+          accessRequestId: flow.request.id,
+          workerId: flow.worker.id,
+          eventType: "ClockedOut",
+          description: `${flow.worker.firstName} ${flow.worker.lastName} clocked out of ${flow.room?.roomNumber ?? "room"}.`,
+        });
+      } catch {
+        /* audit is best-effort */
+      }
       flow.set({
         request: { ...flow.request, status: "Completed", clockedOutAt: now, completedAt: now },
         step: "done",
@@ -839,10 +948,10 @@ function ClockOutStep() {
 
   return (
     <div className="sg-form-grid">
-      <h1>Clock out</h1>
+      <h1>Sign out</h1>
       <p className="sg-muted">
-        Access is approved for {flow.room?.roomNumber}. Photograph the room as you leave, then close
-        the visit.
+        Access is approved for {flow.room?.roomNumber}. Add a photo if you can, then sign out to
+        close the visit.
       </p>
       {flow.request?.clockedInAt ? (
         <div className="sg-room-chip">
@@ -877,7 +986,10 @@ function ClockOutStep() {
       </div>
       {error ? <p className="sg-error">{error}</p> : null}
       <Button variant="primary" block disabled={busy} onClick={() => void finish()}>
-        {busy ? "Closing visit…" : "Clock out"}
+        {busy ? "Signing out…" : "Sign out"}
+      </Button>
+      <Button type="button" onClick={() => flow.set({ step: "visit", mode: "visit" })}>
+        Back
       </Button>
     </div>
   );
