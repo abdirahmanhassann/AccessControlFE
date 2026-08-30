@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Badge, PageSkeleton } from "@/components/ui";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -18,6 +18,7 @@ import { useMounted } from "@/lib/use-mounted";
 export const Route = createFileRoute("/app/")({ component: Overview });
 
 function Overview() {
+  const navigate = useNavigate();
   const mounted = useMounted();
   const [token, setToken] = useState<string>();
   useEffect(() => setToken(readSession()?.token), []);
@@ -121,9 +122,31 @@ function Overview() {
               {approvals.map((a) => {
                 const req = data.requests.find((r) => r.id === a.accessRequestId);
                 return (
-                  <tr key={a.id}>
+                  <tr
+                    key={a.id}
+                    tabIndex={0}
+                    onClick={() =>
+                      navigate({
+                        to: "/app/requests/$id",
+                        params: { id: String(a.accessRequestId || req?.id) },
+                      })
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        void navigate({
+                          to: "/app/requests/$id",
+                          params: { id: String(a.accessRequestId || req?.id) },
+                        });
+                      }
+                    }}
+                  >
                     <td>
-                      <Link to="/app/requests/$id" params={{ id: String(a.accessRequestId) }}>
+                      <Link
+                        to="/app/requests/$id"
+                        params={{ id: String(a.accessRequestId) }}
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         {workerForApproval(data, a)}
                       </Link>
                       {req ? <div className="sg-muted">{roomLabel(data, req.roomId)}</div> : null}

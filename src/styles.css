@@ -341,6 +341,14 @@
 .sg-table tbody tr:hover {
   background: var(--bg-elevated);
 }
+.sg-table a {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+}
+.sg-table a:hover {
+  text-decoration: underline;
+}
 .sg-mono {
   font-family: var(--font-mono);
   font-size: 0.8125rem;

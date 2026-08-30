@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Input, PageSkeleton, Select } from "@/components/ui";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -10,6 +10,7 @@ import { useMounted } from "@/lib/use-mounted";
 export const Route = createFileRoute("/app/requests")({ component: RequestsPage });
 
 function RequestsPage() {
+  const navigate = useNavigate();
   const mounted = useMounted();
   const [token, setToken] = useState<string>();
   const [q, setQ] = useState("");
@@ -61,9 +62,23 @@ function RequestsPage() {
               const st = effectiveStatus(r, data.approvals);
               const approval = latestApproval(data, r.id);
               return (
-                <tr key={r.id}>
+                <tr
+                  key={r.id}
+                  tabIndex={0}
+                  onClick={() => navigate({ to: "/app/requests/$id", params: { id: String(r.id) } })}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      void navigate({ to: "/app/requests/$id", params: { id: String(r.id) } });
+                    }
+                  }}
+                >
                   <td>
-                    <Link to="/app/requests/$id" params={{ id: String(r.id) }}>
+                    <Link
+                      to="/app/requests/$id"
+                      params={{ id: String(r.id) }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       {workerLabel(data, r.workerId, approval || r)}
                     </Link>
                   </td>
