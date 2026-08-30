@@ -349,6 +349,13 @@
 .sg-table a:hover {
   text-decoration: underline;
 }
+.sg-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-top: var(--space-4);
+}
 .sg-mono {
   font-family: var(--font-mono);
   font-size: 0.8125rem;

@@ -1000,15 +1000,34 @@ const handlers: Record<string, (body: Body) => unknown> = {
   "/Access/getaccessrequests": (body) => {
     const session = requireSession(body as { token?: string });
     const db = load();
+    let rows = db.requests;
     if (session.kind === "worker") {
       const phone = session.phoneNumber ? digits(session.phoneNumber) : "";
-      return db.requests.filter(
+      rows = db.requests.filter(
         (r) =>
           (session.workerId != null && r.workerId === session.workerId) ||
           (phone && digits(r.phoneNumber ?? "") === phone),
       );
     }
-    return db.requests;
+    const id = Number(body.id ?? body.Id ?? 0);
+    const workerId = Number(body.workerId ?? body.WorkerId ?? 0);
+    const roomId = Number(body.roomId ?? body.RoomId ?? 0);
+    const status = String(body.status ?? body.Status ?? "");
+    const search = String(body.search ?? body.Search ?? "").toLowerCase();
+    const skip = Number(body.skip ?? body.Skip ?? 0);
+    const take = Number(body.take ?? body.Take ?? 0);
+    if (id) rows = rows.filter((r) => r.id === id);
+    if (workerId) rows = rows.filter((r) => r.workerId === workerId);
+    if (roomId) rows = rows.filter((r) => r.roomId === roomId);
+    if (status) rows = rows.filter((r) => r.status === status);
+    if (search) {
+      rows = rows.filter((r) =>
+        `${r.workType} ${r.reason} ${r.description}`.toLowerCase().includes(search),
+      );
+    }
+    const total = rows.length;
+    const sliced = take > 0 ? rows.slice(skip, skip + take) : rows.slice(skip);
+    return sliced.map((r) => ({ ...r, total }));
   },
   "/Access/insertaccessrequest": (body) => {
     const db = load();
@@ -1113,7 +1132,14 @@ const handlers: Record<string, (body: Body) => unknown> = {
   "/Access/getaccessrequestapprovals": (body) => {
     requireStaff(body as { token?: string });
     const db = load();
-    return db.approvals
+    const id = Number(body.id ?? body.Id ?? 0);
+    const accessRequestId = Number(body.accessRequestId ?? body.AccessRequestId ?? 0);
+    const approverUserId = Number(body.approverUserId ?? body.ApproverUserId ?? 0);
+    const status = String(body.status ?? body.Status ?? "");
+    const search = String(body.search ?? body.Search ?? "").toLowerCase();
+    const skip = Number(body.skip ?? body.Skip ?? 0);
+    const take = Number(body.take ?? body.Take ?? 0);
+    let rows = db.approvals
       .map((a) => {
         const req = db.requests.find((r) => r.id === a.accessRequestId);
         const worker = req ? db.workers.find((w) => w.id === req.workerId) : undefined;
@@ -1130,6 +1156,20 @@ const handlers: Record<string, (body: Body) => unknown> = {
         };
       })
       .sort((a, b) => String(b.reviewedAt || b.createdAt).localeCompare(String(a.reviewedAt || a.createdAt)));
+    if (id) rows = rows.filter((a) => a.id === id);
+    if (accessRequestId) rows = rows.filter((a) => a.accessRequestId === accessRequestId);
+    if (approverUserId) rows = rows.filter((a) => a.approverUserId === approverUserId);
+    if (status) rows = rows.filter((a) => a.status === status);
+    if (search) {
+      rows = rows.filter((a) =>
+        `${a.workerFirstName} ${a.workerLastName} ${a.approverFirstName} ${a.approverLastName}`
+          .toLowerCase()
+          .includes(search),
+      );
+    }
+    const total = rows.length;
+    const sliced = take > 0 ? rows.slice(skip, skip + take) : rows.slice(skip);
+    return sliced.map((a) => ({ ...a, total }));
   },
   "/Access/insertaccessrequestapproval": (body) => {
     const session = requireSession(body as { token?: string });

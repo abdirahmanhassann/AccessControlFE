@@ -54,11 +54,11 @@ export function ManagerShell({ children }: { children?: ReactNode }) {
     }
     setSession(s);
     api
-      .getAccessRequests(s.token)
+      .getAccessRequests(s.token, { status: "Pending", take: 50 })
       .then(async (rows) => {
-        let approvals: Awaited<ReturnType<typeof api.getApprovals>> = [];
+        let approvals: import("@/lib/api/types").AccessRequestApproval[] = [];
         try {
-          approvals = await api.getApprovals(s.token);
+          approvals = await api.getApprovals(s.token, { take: 50 });
         } catch {
           approvals = [];
         }

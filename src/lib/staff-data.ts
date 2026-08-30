@@ -64,8 +64,8 @@ export function useStaffData(token: string | undefined, options?: { pollRequests
         api.getRooms(token),
         api.getWorkers(token),
         api.getUsers(token),
-        api.getAccessRequests(token),
-        api.getApprovals(token),
+        api.getAccessRequests(token, { take: 200 }),
+        api.getApprovals(token, { take: 100 }),
         api.getPhotos(token),
         api.getNotifications(token),
         api.getAudits(token),
@@ -113,7 +113,7 @@ export function useStaffData(token: string | undefined, options?: { pollRequests
   const refreshRequests = useCallback(async () => {
     if (!token) return;
     try {
-      const requests = await api.getAccessRequests(token);
+      const requests = await api.getAccessRequests(token, { take: 200 });
       setData((prev) => (prev ? { ...prev, requests } : prev));
     } catch {
       /* keep last list; polling should not surface a flash error */

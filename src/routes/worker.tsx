@@ -332,8 +332,12 @@ function OtpStep() {
       const session = readWorkerSession();
       const token = session?.token ?? result.token;
       if (token) {
-        const requests = await api.getAccessRequests(token);
         const roomId = Number(flow.room?.id ?? (flow.room as { roomId?: number } | null)?.roomId ?? 0);
+        const requests = await api.getAccessRequests(token, {
+          workerId: worker.id || undefined,
+          roomId: roomId || undefined,
+          take: 20,
+        });
         const active = requests.find(
           (r) => r.roomId === roomId && (r.status === "Pending" || r.status === "Approved"),
         );
@@ -698,7 +702,10 @@ function WaitingStep() {
     let stop = false;
     async function poll() {
       try {
-        const rows = await api.getAccessRequests(token!);
+        const rows = await api.getAccessRequests(token!, {
+          id: flow.request?.id,
+          take: 1,
+        });
         const row = rows.find((r) => r.id === flow.request?.id);
         if (!row || stop) return;
         setStatus(row.status);

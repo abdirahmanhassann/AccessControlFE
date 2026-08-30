@@ -374,6 +374,43 @@ function allFilterBody(token: string) {
   return { token };
 }
 
+export type ListFilter = {
+  id?: number;
+  workerId?: number;
+  roomId?: number;
+  accessRequestId?: number;
+  approverUserId?: number;
+  status?: string;
+  search?: string;
+  skip?: number;
+  take?: number;
+};
+
+export type PagedList<T> = T[] & { total: number };
+
+function listFilterBody(token: string, filter?: ListFilter) {
+  const body: Record<string, unknown> = { token };
+  if (filter) {
+    for (const [key, value] of Object.entries(filter)) {
+      if (value == null || value === "" || value === "all") continue;
+      if (typeof value === "number" && value === 0 && key !== "skip") continue;
+      body[key] = value;
+    }
+  }
+  return dual(body);
+}
+
+function asPagedList<T>(
+  raw: unknown,
+  map: (row: unknown) => T,
+  keep: (row: T) => boolean,
+): PagedList<T> {
+  const source = asArray<unknown>(raw);
+  const rows = source.map(map).filter(keep) as PagedList<T>;
+  rows.total = pickNum(coerceRow(source[0]), ["total"]) || rows.length;
+  return rows;
+}
+
 function dual(payload: Record<string, unknown>) {
   const out: Record<string, unknown> = { ...payload };
   for (const [key, value] of Object.entries(payload)) {
@@ -646,10 +683,12 @@ export const api = {
   updateAccessWindow: (token: string, data: AccessWindow) =>
     post<AccessWindow | null>("/Access/updateaccesswindow", { token, ...data }),
 
-  getAccessRequests: async (token: string) =>
-    asArray<unknown>(await post("/Access/getaccessrequests", { token }))
-      .map((row) => asRequestRow(row))
-      .filter((row) => row.id),
+  getAccessRequests: async (token: string, filter?: ListFilter) =>
+    asPagedList(
+      await post("/Access/getaccessrequests", listFilterBody(token, filter)),
+      (row) => asRequestRow(row),
+      (row) => Boolean(row.id),
+    ),
   insertAccessRequest: async (data: {
     phoneNumber: string;
     workerId: number;
@@ -697,10 +736,12 @@ export const api = {
   updateAccessRequest: (token: string, data: Partial<AccessRequest> & { id: number }) =>
     post<AccessRequest | null>("/Access/updateaccessrequest", { token, ...data }),
 
-  getApprovals: async (token: string) =>
-    asArray<unknown>(await post("/Access/getaccessrequestapprovals", allFilterBody(token)))
-      .map((row) => asApproval(row))
-      .filter((row) => row.id || row.accessRequestId),
+  getApprovals: async (token: string, filter?: ListFilter) =>
+    asPagedList(
+      await post("/Access/getaccessrequestapprovals", listFilterBody(token, filter)),
+      (row) => asApproval(row),
+      (row) => Boolean(row.id || row.accessRequestId),
+    ),
   insertApproval: (
     token: string,
     data: { accessRequestId: number; approverUserId: number; status: string; comment: string },

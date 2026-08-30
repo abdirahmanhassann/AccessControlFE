@@ -16,6 +16,7 @@ import { prettyPhone, statusTone, whenExact } from "@/lib/format";
 import { useMounted } from "@/lib/use-mounted";
 import { api } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/types";
+import type { AccessRequest, AccessRequestApproval } from "@/lib/api/types";
 
 export const Route = createFileRoute("/app/requests_/$id")({ component: RequestDetail });
 
@@ -26,16 +27,36 @@ function RequestDetail() {
   const [token, setToken] = useState<string>();
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
+  const [fetched, setFetched] = useState<AccessRequest | null>(null);
+  const [fetchedApprovals, setFetchedApprovals] = useState<AccessRequestApproval[]>([]);
   useEffect(() => setToken(readSession()?.token), []);
   const { data, loading, reload, error } = useStaffData(token, { pollRequests: true });
-  const req = data?.requests.find((r) => r.id === Number(id));
+
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    void Promise.all([
+      api.getAccessRequests(token, { id: Number(id), take: 1 }),
+      api.getApprovals(token, { accessRequestId: Number(id), take: 50 }),
+    ]).then(([reqs, apprs]) => {
+      if (cancelled) return;
+      setFetched(reqs[0] ?? null);
+      setFetchedApprovals(apprs);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, id, data?.requests, data?.approvals]);
+
+  const req = data?.requests.find((r) => r.id === Number(id)) ?? fetched;
 
   async function decide(status: "Approved" | "Rejected" | "Cancelled") {
     const session = readSession();
     if (!session || !req || !data) return;
     const existing =
-      data.approvals.find((a) => a.accessRequestId === req.id && /^pending$/i.test(String(a.status))) ||
-      latestApproval(data, req.id);
+      (fetchedApprovals.length ? fetchedApprovals : data.approvals).find(
+        (a) => a.accessRequestId === req.id && /^pending$/i.test(String(a.status)),
+      ) || latestApproval({ ...data, approvals: fetchedApprovals.length ? fetchedApprovals : data.approvals }, req.id);
     if (!existing?.id) {
       toast("No AccessRequestApprovalId to update.");
       return;
@@ -95,10 +116,15 @@ function RequestDetail() {
 
   const worker = data.workers.find((w) => w.id === req.workerId);
   const photos = data.photos.filter((p) => p.accessRequestId === req.id);
-  const approvals = data.approvals.filter((a) => a.accessRequestId === req.id);
+  const approvals = (fetchedApprovals.length ? fetchedApprovals : data.approvals).filter(
+    (a) => a.accessRequestId === req.id,
+  );
   const events = data.audits.filter((a) => a.accessRequestId === req.id);
-  const latest = latestApproval(data, req.id);
-  const status = effectiveStatus(req, data.approvals);
+  const latest = latestApproval(
+    { ...data, approvals: fetchedApprovals.length ? fetchedApprovals : data.approvals },
+    req.id,
+  );
+  const status = effectiveStatus(req, fetchedApprovals.length ? fetchedApprovals : data.approvals);
   const workerName = workerLabel(data, req.workerId, latest || req);
   const workerPhone = worker?.phoneNumber || req.workerPhoneNumber || latest?.workerPhoneNumber || "";
 
