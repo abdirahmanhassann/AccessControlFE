@@ -683,9 +683,9 @@ export const api = {
   updateAccessWindow: (token: string, data: AccessWindow) =>
     post<AccessWindow | null>("/Access/updateaccesswindow", { token, ...data }),
 
-  getAccessRequests: async (token: string, filter?: ListFilter) =>
+  getAccessRequests: async (token: string | undefined, filter?: ListFilter) =>
     asPagedList(
-      await post("/Access/getaccessrequests", listFilterBody(token, filter)),
+      await post("/Access/getaccessrequests", listFilterBody(token ?? "", filter)),
       (row) => asRequestRow(row),
       (row) => Boolean(row.id),
     ),

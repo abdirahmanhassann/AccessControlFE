@@ -32,14 +32,9 @@ const STEPS = ["scan", "phone", "otp", "form", "waiting", "visit", "clockout", "
 
 function isOpenVisit(req: AccessRequest | null | undefined, roomId: number) {
   if (!req || !roomId || req.roomId !== roomId) return false;
-  if (!/^approved$/i.test(String(req.status))) return false;
   if (req.clockedOutAt || req.completedAt) return false;
   if (/^completed$/i.test(String(req.status))) return false;
-  if (req.expectedClockOutAt) {
-    const t = Date.parse(req.expectedClockOutAt);
-    if (Number.isFinite(t) && t < Date.now()) return false;
-  }
-  return true;
+  return /^approved$/i.test(String(req.status));
 }
 
 export const Route = createFileRoute("/worker")({
@@ -343,25 +338,26 @@ function OtpStep() {
         kind: "worker",
       });
       const session = readWorkerSession();
-      const token = session?.token ?? result.token;
-      if (token) {
-        const roomId = Number(flow.room?.id ?? (flow.room as { roomId?: number } | null)?.roomId ?? 0);
-        const requests = await api.getAccessRequests(token, {
+      const token = session?.token || result.token || "";
+      const roomId = Number(flow.room?.id ?? (flow.room as { roomId?: number } | null)?.roomId ?? 0);
+      let requests: AccessRequest[] = [];
+      try {
+        requests = await api.getAccessRequests(token, {
           workerId: worker.id || undefined,
           roomId: roomId || undefined,
           take: 20,
         });
-        const activePending = requests.find(
-          (r) => r.roomId === roomId && /^pending$/i.test(String(r.status)),
-        );
-        const openVisit = requests.find((r) => isOpenVisit(r, roomId));
-        if (activePending) {
-          flow.set({ worker, request: activePending, mode: "waiting", step: "waiting" });
-        } else if (openVisit) {
-          flow.set({ worker, request: openVisit, mode: "visit", step: "visit" });
-        } else {
-          flow.set({ worker, request: null, mode: "request", step: "form" });
-        }
+      } catch {
+        requests = [];
+      }
+      const activePending = requests.find(
+        (r) => r.roomId === roomId && /^pending$/i.test(String(r.status)),
+      );
+      const openVisit = requests.find((r) => isOpenVisit(r, roomId));
+      if (activePending) {
+        flow.set({ worker, request: activePending, mode: "waiting", step: "waiting" });
+      } else if (openVisit) {
+        flow.set({ worker, request: openVisit, mode: "visit", step: "visit" });
       } else {
         flow.set({ worker, request: null, mode: "request", step: "form" });
       }
@@ -422,6 +418,27 @@ function FormStep() {
   const [departments, setDepartments] = useState<Department[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [openVisit, setOpenVisit] = useState<AccessRequest | null>(null);
+
+  useEffect(() => {
+    const roomId = Number(flow.room?.id ?? 0);
+    const workerId = flow.worker?.id;
+    if (!roomId || !workerId) return;
+    let cancelled = false;
+    void api
+      .getAccessRequests(readWorkerSession()?.token, { workerId, roomId, take: 20 })
+      .then((rows) => {
+        if (cancelled) return;
+        const hit = rows.find((r) => isOpenVisit(r, roomId));
+        setOpenVisit(hit ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setOpenVisit(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [flow.room?.id, flow.worker?.id]);
 
   useEffect(() => {
     let cancelled = false;
@@ -623,6 +640,21 @@ function FormStep() {
           <small>{flow.room.description}</small>
         </div>
       ) : null}
+      {openVisit ? (
+        <div className="sg-room-chip">
+          <strong>You already have an approved visit here</strong>
+          <small>Clock in or sign out instead of sending a new request.</small>
+          <div className="sg-actions" style={{ marginTop: 8 }}>
+            <Button
+              type="button"
+              variant="primary"
+              onClick={() => flow.set({ request: openVisit, mode: "visit", step: "visit" })}
+            >
+              Clock in / sign out
+            </Button>
+          </div>
+        </div>
+      ) : null}
       {error ? <p className="sg-error">{error}</p> : null}
       <div className="sg-form-grid two">
         <Field label="First name">
@@ -712,12 +744,13 @@ function WaitingStep() {
 
   useEffect(() => {
     const token = readWorkerSession()?.token;
-    if (!token || !flow.request) return;
+    if (!flow.request) return;
     let stop = false;
     async function poll() {
       try {
-        const rows = await api.getAccessRequests(token!, {
+        const rows = await api.getAccessRequests(token, {
           id: flow.request?.id,
+          workerId: flow.worker?.id || undefined,
           take: 1,
         });
         const row = rows.find((r) => r.id === flow.request?.id);
@@ -725,9 +758,16 @@ function WaitingStep() {
         setStatus(row.status);
         flow.set({ request: row });
         if (row.status === "Approved") {
-          const notes = await api.getNotifications(token!);
-          const hit = notes.find((n) => n.accessRequestId === row.id && n.type === "Approved");
-          setComment(hit?.message ?? "");
+          setComment("");
+          if (token) {
+            try {
+              const notes = await api.getNotifications(token);
+              const hit = notes.find((n) => n.accessRequestId === row.id && n.type === "Approved");
+              setComment(hit?.message ?? "");
+            } catch {
+              /* optional */
+            }
+          }
           flow.set({ request: row, mode: "visit", step: "visit" });
         }
         if (row.status === "Rejected") {
