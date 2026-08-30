@@ -733,8 +733,11 @@ export const api = {
       workerId,
     });
   },
-  updateAccessRequest: (token: string, data: Partial<AccessRequest> & { id: number }) =>
-    post<AccessRequest | null>("/Access/updateaccessrequest", dual({ token, ...data })),
+  updateAccessRequest: (token: string | undefined, data: Partial<AccessRequest> & { id: number }) => {
+    const payload: Record<string, unknown> = { ...data };
+    if (token) payload.token = token;
+    return post<AccessRequest | null>("/Access/updateaccessrequest", dual(payload));
+  },
 
   getApprovals: async (token: string, filter?: ListFilter) =>
     asPagedList(

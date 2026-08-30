@@ -869,20 +869,21 @@ function VisitStep() {
   const expected = flow.request?.expectedClockOutAt;
 
   async function clockIn() {
-    const session = readWorkerSession();
-    if (!session || !flow.request || !flow.worker?.id) {
-      setError("Worker details are missing. Verify OTP again.");
+    if (!flow.request) {
+      setError("No approved visit found.");
       return;
     }
+    const workerId = flow.request.workerId || flow.worker?.id || 0;
+    const session = readWorkerSession();
     setBusy(true);
     setError("");
     try {
       const now = new Date();
       const expectedOut =
         flow.request.expectedClockOutAt || new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString();
-      await api.updateAccessRequest(session.token, {
+      await api.updateAccessRequest(session?.token, {
         id: flow.request.id,
-        workerId: flow.worker.id || flow.request.workerId,
+        workerId,
         roomId: flow.request.roomId,
         status: "Approved",
         reason: flow.request.reason,
@@ -892,12 +893,14 @@ function VisitStep() {
         expectedClockOutAt: expectedOut.slice(0, 19),
       });
       try {
-        await api.insertAudit(session.token, {
-          accessRequestId: flow.request.id,
-          workerId: flow.worker.id,
-          eventType: "ClockedIn",
-          description: `${flow.worker.firstName} ${flow.worker.lastName} clocked in to ${flow.room?.roomNumber ?? "room"}.`,
-        });
+        if (session?.token) {
+          await api.insertAudit(session.token, {
+            accessRequestId: flow.request.id,
+            workerId,
+            eventType: "ClockedIn",
+            description: `${flow.worker?.firstName ?? "Worker"} ${flow.worker?.lastName ?? ""} clocked in to ${flow.room?.roomNumber ?? "room"}.`,
+          });
+        }
       } catch {
         /* audit is best-effort */
       }
@@ -974,27 +977,31 @@ function ClockOutStep() {
   }
 
   async function finish() {
+    if (!flow.request) return;
+    const workerId = flow.request.workerId || flow.worker?.id || 0;
     const session = readWorkerSession();
-    if (!session || !flow.request || !flow.worker) return;
+    const token = session?.token || "";
     setBusy(true);
     setError("");
     try {
-      for (const photo of photos) {
-        await api.insertPhoto(session.token, {
-          accessRequestId: flow.request.id,
-          storagePath: photo.dataUrl,
-          originalFileName: photo.name,
-          contentType: photo.type,
-          fileSize: photo.size,
-          uploadedByWorkerId: flow.worker.id,
-          capturedAt: new Date().toISOString(),
-          photoType,
-        });
+      if (token) {
+        for (const photo of photos) {
+          await api.insertPhoto(token, {
+            accessRequestId: flow.request.id,
+            storagePath: photo.dataUrl,
+            originalFileName: photo.name,
+            contentType: photo.type,
+            fileSize: photo.size,
+            uploadedByWorkerId: workerId,
+            capturedAt: new Date().toISOString(),
+            photoType,
+          });
+        }
       }
       const now = new Date().toISOString();
-      await api.updateAccessRequest(session.token, {
+      await api.updateAccessRequest(token, {
         id: flow.request.id,
-        workerId: flow.worker.id || flow.request.workerId,
+        workerId,
         roomId: flow.request.roomId,
         status: "Completed",
         reason: flow.request.reason,
@@ -1004,12 +1011,14 @@ function ClockOutStep() {
         completedAt: now.slice(0, 19),
       });
       try {
-        await api.insertAudit(session.token, {
-          accessRequestId: flow.request.id,
-          workerId: flow.worker.id,
-          eventType: "ClockedOut",
-          description: `${flow.worker.firstName} ${flow.worker.lastName} clocked out of ${flow.room?.roomNumber ?? "room"}.`,
-        });
+        if (token) {
+          await api.insertAudit(token, {
+            accessRequestId: flow.request.id,
+            workerId,
+            eventType: "ClockedOut",
+            description: `${flow.worker?.firstName ?? "Worker"} ${flow.worker?.lastName ?? ""} clocked out of ${flow.room?.roomNumber ?? "room"}.`,
+          });
+        }
       } catch {
         /* audit is best-effort */
       }
