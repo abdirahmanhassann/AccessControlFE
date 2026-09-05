@@ -12,10 +12,10 @@ import {
 } from "lucide-react";
 import { BrandMark, Button, Field, Input, Select, Textarea, toast } from "@/components/ui";
 import { QrImage } from "@/components/QrImage";
-import { api, USE_MOCK } from "@/lib/api/client";
-import { ApiError, PHOTO_TYPES, WORK_TYPES, type AccessRequest, type Department, type Room, type ScanQrResult, type User, type WorkArea } from "@/lib/api/types";
+import { api } from "@/lib/api/client";
+import { ApiError, PHOTO_TYPES, WORK_TYPES, type AccessRequest, type Department, type Room, type ScanQrResult, type Site, type User, type WorkArea } from "@/lib/api/types";
 import { compressImage } from "@/lib/image";
-import { writeWorkerSession, readWorkerSession, readSession, clearWorkerSession } from "@/lib/session";
+import { writeWorkerSession, readWorkerSession, clearWorkerSession } from "@/lib/session";
 import { useWorkerFlow } from "@/lib/worker-flow";
 import { prettyPhone, whenExact } from "@/lib/format";
 import { locationDisplay, matchEnteredRoom } from "@/lib/location";
@@ -26,7 +26,7 @@ const DEMO_SITES = [
   { qr: "SG-OAK-GATE", name: "Oakridge Mixed-Use", note: "Tower A" },
 ];
 
-const STEPS = ["scan", "phone", "otp", "form", "waiting", "visit", "clockout", "done"] as const;
+const STEPS = ["phone", "otp", "form", "waiting", "visit", "clockout", "done"] as const;
 
 function isOpenVisit(req: AccessRequest | null | undefined, siteRoomIds?: number[]) {
   if (!req) return false;
@@ -105,7 +105,10 @@ function WorkerPage() {
   const mounted = useMounted();
   const search = Route.useSearch();
   const flow = useWorkerFlow();
-  const stepIndex = Math.max(0, STEPS.indexOf(flow.step));
+  const stepIndex = Math.max(
+    0,
+    STEPS.indexOf(flow.step === "scan" ? "phone" : (flow.step as (typeof STEPS)[number])),
+  );
 
   useEffect(() => {
     if (search.qr && search.qr !== flow.qrCodeIdentifier) {
@@ -174,22 +177,10 @@ function ScanStep() {
   const [camError, setCamError] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
   const [camOn, setCamOn] = useState(false);
-  const [liveSites, setLiveSites] = useState<Array<{ qr: string; name: string; note?: string }>>([]);
+  const [sites, setSites] = useState<Site[]>([]);
 
   useEffect(() => {
-    if (USE_MOCK) return;
-    const token = readSession()?.token;
-    if (!token) return;
-    void api
-      .getSites(token)
-      .then((rows) =>
-        setLiveSites(
-          rows
-            .filter((s) => s.isActive !== false && s.qrCodeIdentifier)
-            .map((s) => ({ qr: s.qrCodeIdentifier || "", name: s.name, note: s.address })),
-        ),
-      )
-      .catch(() => setLiveSites([]));
+    void api.listSites().then(setSites).catch(() => setSites([]));
   }, []);
 
   async function go(qr: string) {
@@ -214,6 +205,17 @@ function ScanStep() {
     }
   }
 
+  function pickSite(site: Site) {
+    flow.set({
+      qrCodeIdentifier: site.qrCodeIdentifier || "",
+      room: null,
+      siteId: site.id,
+      siteName: site.name,
+      siteAddress: site.address,
+      step: "phone",
+    });
+  }
+
   async function startCamera() {
     setCamError("");
     try {
@@ -227,7 +229,7 @@ function ScanStep() {
       setCamOn(true);
       const Detector = (window as unknown as { BarcodeDetector?: new (o: { formats: string[] }) => { detect: (s: ImageBitmapSource) => Promise<Array<{ rawValue: string }>> } }).BarcodeDetector;
       if (!Detector) {
-        setCamError("This browser cannot read QR from camera. Pick a demo site or type the code.");
+        setCamError("This browser cannot read QR from camera. Pick a site below or skip.");
         return;
       }
       const detector = new Detector({ formats: ["qr_code"] });
@@ -248,15 +250,28 @@ function ScanStep() {
       };
       void tick();
     } catch {
-      setCamError("Camera is blocked in this preview. Use a demo site below.");
+      setCamError("Camera is blocked in this preview. Pick a site or continue without scanning.");
     }
   }
 
+  const picks = sites.length
+    ? sites.map((s) => ({
+        key: String(s.id),
+        qr: s.qrCodeIdentifier || "",
+        name: s.name,
+        note: s.address,
+        site: s,
+      }))
+    : DEMO_SITES.map((s) => ({ ...s, key: s.qr, site: null as Site | null }));
+
   return (
     <>
-      <h1>Scan the site QR</h1>
-      <p className="sg-muted">Point at the code at the gate. You pick the tower, department, and room on the next form.</p>
+      <h1>Site QR is optional</h1>
+      <p className="sg-muted">Skip this. You pick the site on the form.</p>
       {error ? <p className="sg-error">{error}</p> : null}
+      <Button variant="primary" block disabled={busy} onClick={() => flow.set({ step: "phone" })}>
+        Continue without scanning
+      </Button>
       <video
         ref={videoRef}
         playsInline
@@ -274,30 +289,29 @@ function ScanStep() {
           placeholder="SG-RIV-GATE"
         />
       </Field>
-      <Button variant="primary" block disabled={busy || !manual.trim()} onClick={() => void go(manual)}>
-        {busy ? "Looking up…" : "Continue"}
+      <Button block disabled={busy || !manual.trim()} onClick={() => void go(manual)}>
+        {busy ? "Looking up…" : "Use this code"}
       </Button>
       <p className="sg-label" style={{ marginTop: 8 }}>
-        {USE_MOCK ? "Demo sites" : "Sites from AccessControl"}
+        Or pick the site
       </p>
       <div className="sg-room-grid">
-        {(USE_MOCK ? DEMO_SITES : liveSites).map((r) => (
-          <button key={r.qr} className="sg-room-pick" onClick={() => void go(r.qr)} disabled={busy}>
-            <QrImage value={r.qr} size={64} />
+        {picks.map((r) => (
+          <button
+            key={r.key}
+            className="sg-room-pick"
+            onClick={() => (r.site ? pickSite(r.site) : void go(r.qr))}
+            disabled={busy}
+          >
+            {r.qr ? <QrImage value={r.qr} size={64} /> : <QrCode size={32} />}
             <div>
               <strong>{r.name}</strong>
-              <div className="sg-muted">{r.qr}</div>
+              {r.qr ? <div className="sg-muted">{r.qr}</div> : null}
               {r.note ? <div className="sg-help">{r.note}</div> : null}
             </div>
-            <QrCode size={16} />
           </button>
         ))}
       </div>
-      {!USE_MOCK && !liveSites.length ? (
-        <p className="sg-help">
-          Sign in as a manager, add a gate QR on the site, then scan that code here.
-        </p>
-      ) : null}
     </>
   );
 }
@@ -331,7 +345,7 @@ function PhoneStep() {
   return (
     <form onSubmit={send} className="sg-form-grid">
       <h1>Your mobile number</h1>
-      <p className="sg-muted">We send a one-time code to this number.</p>
+      <p className="sg-muted">We send a one-time code, then you fill in the site, tower, and room.</p>
       {flow.siteName ? (
         <div className="sg-room-chip">
           <strong>{flow.siteName}</strong>
@@ -351,7 +365,7 @@ function PhoneStep() {
         {busy ? "Sending…" : "Send SMS code"}
       </Button>
       <Button type="button" onClick={() => flow.set({ step: "scan" })}>
-        Back
+        <QrCode size={14} /> Optional: scan a site QR
       </Button>
     </form>
   );
@@ -491,6 +505,7 @@ function FormStep() {
     workDate: todayIsoDate(),
     workFrom: "08:00",
     workTo: "17:00",
+    siteId: flow.siteId ? String(flow.siteId) : "",
     towerId: flow.room?.workAreaId ? String(flow.room.workAreaId) : "",
     departmentId: "",
     roomText: flow.room?.roomNumber || flow.room?.name || "",
@@ -499,6 +514,7 @@ function FormStep() {
     description: "",
     approverUserId: "",
   });
+  const [sites, setSites] = useState<Site[]>([]);
   const [towers, setTowers] = useState<WorkArea[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
   const [locations, setLocations] = useState<Room[]>([]);
@@ -506,11 +522,47 @@ function FormStep() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [openVisit, setOpenVisit] = useState<AccessRequest | null>(null);
-  const siteId = flow.siteId || flow.room?.siteId || 0;
+  const siteId = Number(form.siteId) || flow.siteId || flow.room?.siteId || 0;
   const matchedRoom = matchEnteredRoom(locations, form.roomText);
+  const selectedSite = sites.find((s) => s.id === siteId);
 
   useEffect(() => {
-    if (!siteId) return;
+    let cancelled = false;
+    void api.listSites().then((rows) => {
+      if (cancelled) return;
+      setSites(rows);
+      setForm((prev) => {
+        if (prev.siteId && rows.some((s) => String(s.id) === prev.siteId)) return prev;
+        if (flow.siteId && rows.some((s) => s.id === flow.siteId)) return { ...prev, siteId: String(flow.siteId) };
+        if (rows.length === 1) return { ...prev, siteId: String(rows[0].id) };
+        return prev;
+      });
+    }).catch(() => {
+      if (!cancelled) setSites([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!selectedSite || selectedSite.id === flow.siteId) return;
+    flow.set({
+      siteId: selectedSite.id,
+      siteName: selectedSite.name,
+      siteAddress: selectedSite.address,
+      qrCodeIdentifier: flow.qrCodeIdentifier || selectedSite.qrCodeIdentifier || "",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedSite?.id]);
+
+  useEffect(() => {
+    if (!siteId) {
+      setTowers([]);
+      setDepartments([]);
+      return;
+    }
     let cancelled = false;
     void Promise.all([api.listTowers(siteId), api.listDepartments(siteId)])
       .then(([towerRows, deptRows]) => {
@@ -620,42 +672,16 @@ function FormStep() {
     };
   }, [siteId, flow.worker?.id]);
 
-  useEffect(() => {
-    if (flow.siteId || flow.room?.id) return;
-    const qr = flow.qrCodeIdentifier.trim();
-    if (!qr) {
-      flow.set({ step: "scan" });
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const scanned = await api.scanQr(qr);
-        if (cancelled) return;
-        const isSite = scanned.scanKind === "site" || (scanned.siteId && !scanned.id);
-        flow.set({
-          room: isSite ? null : scanned,
-          siteId: scanned.siteId,
-          siteName: scanned.siteName,
-          siteAddress: scanned.siteAddress,
-          qrCodeIdentifier: qr,
-        });
-      } catch {
-        if (!cancelled) flow.set({ step: "scan" });
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const selectedLocation = matchedRoom || locations.find((r) => String(r.id) === form.locationId);
   const selectedTower = towers.find((t) => String(t.id) === form.towerId);
   const selectedDepartment = departments.find((d) => String(d.id) === form.departmentId);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (!form.siteId) {
+      setError("Choose the site.");
+      return;
+    }
     if (!form.towerId) {
       setError("Choose the tower.");
       return;
@@ -728,9 +754,9 @@ function FormStep() {
         ? {
             ...selectedLocation,
             workAreaName: selectedTower?.name ?? "",
-            siteName: flow.siteName,
+            siteName: selectedSite?.name || flow.siteName,
             siteId,
-            siteAddress: flow.siteAddress,
+            siteAddress: selectedSite?.address || flow.siteAddress,
             scanKind: "room" as const,
           }
         : flow.room;
@@ -776,12 +802,14 @@ function FormStep() {
   return (
     <form onSubmit={submit} className="sg-form-grid">
       <h1>Access request</h1>
-      {flow.siteName ? (
+      {selectedSite || flow.siteName ? (
         <div className="sg-room-chip">
-          <strong>{flow.siteName}</strong>
-          <small>{flow.siteAddress || "Pick tower, department, then enter the room."}</small>
+          <strong>{selectedSite?.name || flow.siteName}</strong>
+          <small>{selectedSite?.address || flow.siteAddress || "Pick tower, department, then enter the room."}</small>
         </div>
-      ) : null}
+      ) : (
+        <p className="sg-muted">Pick the site, tower, department, then type the room. No QR needed.</p>
+      )}
       {openVisit ? (
         <div className="sg-room-chip">
           <strong>You already have an approved visit on this site</strong>
@@ -858,8 +886,41 @@ function FormStep() {
         </Field>
       </div>
       <Field
+        label="Which site"
+        hint={sites.length ? "Where you are working today." : "No sites loaded yet."}
+      >
+        <Select
+          value={form.siteId}
+          onChange={(e) =>
+            setForm({
+              ...form,
+              siteId: e.target.value,
+              towerId: "",
+              departmentId: "",
+              locationId: "",
+              roomText: "",
+              approverUserId: "",
+            })
+          }
+          required
+        >
+          <option value="">Select site</option>
+          {sites.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.name}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Field
         label="Which tower"
-        hint={towers.length ? "Towers on this site." : "No towers loaded for this site yet."}
+        hint={
+          !form.siteId
+            ? "Choose a site first."
+            : towers.length
+              ? "Towers on this site."
+              : "No towers loaded for this site yet."
+        }
       >
         <Select
           value={form.towerId}
@@ -873,6 +934,7 @@ function FormStep() {
             })
           }
           required
+          disabled={!form.siteId}
         >
           <option value="">Select tower</option>
           {towers.map((t) => (
@@ -885,15 +947,18 @@ function FormStep() {
       <Field
         label="Department"
         hint={
-          departments.length
-            ? "Trade that owns this visit. That department’s manager will approve."
-            : "No departments loaded for this site yet."
+          !form.siteId
+            ? "Choose a site first."
+            : departments.length
+              ? "Trade that owns this visit. That department’s manager will approve."
+              : "No departments loaded for this site yet."
         }
       >
         <Select
           value={form.departmentId}
           onChange={(e) => setForm({ ...form, departmentId: e.target.value, approverUserId: "" })}
           required
+          disabled={!form.siteId}
         >
           <option value="">Select department</option>
           {departments.map((d) => (

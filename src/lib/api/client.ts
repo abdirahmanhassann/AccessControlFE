@@ -303,6 +303,18 @@ function asDepartment(data: unknown): Department {
   };
 }
 
+function asSite(data: unknown): Site {
+  const row = coerceRow(data);
+  return {
+    id: pickNum(row, ["id", "siteId"]),
+    name: pickStr(row, ["name", "siteName"]),
+    address: pickStr(row, ["address", "siteAddress"]),
+    reference: pickStr(row, ["reference"]),
+    isActive: row.isActive !== false && row.IsActive !== false,
+    qrCodeIdentifier: pickStr(row, ["qrCodeIdentifier"]) || undefined,
+  };
+}
+
 function asWorkerRow(
   data: unknown,
   fallback?: { firstName?: string; lastName?: string; phoneNumber?: string; companyName?: string },
@@ -583,7 +595,16 @@ export const api = {
     return { ...room, scanKind: "room" as const };
   },
 
-  getSites: (token: string) => post<Site[]>("/Access/getsites", { token }).then(asArray<Site>),
+  getSites: (token: string) =>
+    post("/Access/getsites", { token }).then((data) => asArray<unknown>(data).map(asSite).filter((s) => s.id)),
+  listSites: async () =>
+    asArray<unknown>(
+      await post("/Access/getsites", {
+        token: readWorkerSession()?.token || readSession()?.token || "",
+      }),
+    )
+      .map(asSite)
+      .filter((s) => s.id && s.isActive !== false),
   insertSite: (token: string, data: Omit<Site, "id" | "isActive">) =>
     post<Site | null>("/Access/insertsite", { token, ...data }),
   updateSite: (token: string, data: Site) => post<Site | null>("/Access/updatesite", { token, ...data }),

@@ -14,7 +14,7 @@ function Home() {
             Manager console
           </Link>
           <Link to="/worker" className="sg-btn sg-btn-primary">
-            Scan a site QR
+            Request access
           </Link>
         </div>
       </header>
@@ -24,8 +24,8 @@ function Home() {
           <div className="sg-kicker">Construction site access</div>
           <h1>Room access, without the clipboard.</h1>
           <p className="sg-lede">
-            Workers scan a site QR, verify by SMS, pick tower and apartment or riser, then wait for
-            the manager for that location. Every visit is photographed, timed, and stored for audit.
+            Workers verify by SMS, pick the site, tower and room, then wait for the manager
+            for that department. Every visit is photographed, timed, and stored for audit.
           </p>
           <div className="sg-cta-row">
             <Link to="/worker" className="sg-btn sg-btn-primary">
@@ -40,10 +40,9 @@ function Home() {
           <h2>How a visit works</h2>
           <div className="sg-step-list">
             {[
-              ["Scan", "Site QR at the gate."],
               ["Verify", "Phone number + one-time SMS code."],
-              ["Request", "Tower, apartment or riser, job, and supervisor."],
-              ["Approve", "Only the manager for that location reviews it."],
+              ["Request", "Site, tower, department, room, job, and supervisor."],
+              ["Approve", "Only the manager for that department reviews it."],
               ["Leave", "Photo of the area, then clock out."],
             ].map(([title, body], i) => (
               <div className="sg-step-item" key={title}>
@@ -66,8 +65,8 @@ function Home() {
             </div>
             <h3>No app login for trades</h3>
             <p>
-              A worker only needs a phone. Scan the gate, SMS, form. If they already have
-              an approved visit on this site, the same QR clocks them in or out.
+              A worker only needs a phone. SMS, then the form. Site QR is optional.
+              If they already have an approved visit, the same screen clocks them in or out.
             </p>
           </div>
           <div>

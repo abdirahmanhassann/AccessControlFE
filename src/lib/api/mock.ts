@@ -859,8 +859,12 @@ const handlers: Record<string, (body: Body) => unknown> = {
   },
 
   "/Access/getsites": (body) => {
-    requireStaff(body as { token?: string });
-    return load().sites;
+    const token = String(body.token ?? body.Token ?? "").trim();
+    if (token) {
+      const session = requireSession(body as { token?: string });
+      if (session.kind === "staff") return load().sites;
+    }
+    return load().sites.filter((s) => s.isActive !== false);
   },
   "/Access/insertsite": (body) => {
     requireStaff(body as { token?: string });

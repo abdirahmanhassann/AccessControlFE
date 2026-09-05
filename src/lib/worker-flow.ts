@@ -31,7 +31,7 @@ type WorkerFlow = {
 };
 
 const empty = {
-  step: "scan" as WorkerStep,
+  step: "phone" as WorkerStep,
   qrCodeIdentifier: "",
   siteId: 0,
   siteName: "",
@@ -53,6 +53,16 @@ export const useWorkerFlow = create<WorkerFlow>()(
       startWithQr: (qr) => set({ ...empty, qrCodeIdentifier: qr, step: "scan" }),
       reset: () => set(empty),
     }),
-    { name: "sitegate.worker-flow", version: 4 },
+    {
+      name: "sitegate.worker-flow",
+      version: 5,
+      migrate: (persisted) => {
+        const s = (persisted ?? {}) as Partial<WorkerFlow>;
+        if (s.step === "scan" && !s.qrCodeIdentifier) {
+          return { ...s, step: "phone" };
+        }
+        return s as WorkerFlow;
+      },
+    },
   ),
 );
