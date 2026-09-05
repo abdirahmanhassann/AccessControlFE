@@ -37,7 +37,7 @@ function Overview() {
   const rejected = approvals.filter((a) => /^rejected$/i.test(String(a.status)));
   const onSite = data.requests.filter((r) => {
     const status = effectiveStatus(r, data.approvals);
-    return /^approved$/i.test(status) && !r.clockedOutAt;
+    return /^approved$/i.test(status) && Boolean(r.clockedInAt) && !r.clockedOutAt && !r.completedAt;
   });
 
   return (
@@ -84,7 +84,7 @@ function Overview() {
           </div>
         </section>
         <section className="sg-card">
-          <h2>Currently in rooms</h2>
+          <h2>On site now</h2>
           <div className="sg-list" style={{ marginTop: 14 }}>
             {onSite.length === 0 ? (
               <p className="sg-muted">Nobody clocked in.</p>
@@ -105,7 +105,7 @@ function Overview() {
       <section className="sg-card">
         <h2>Access request approvals</h2>
         <p className="sg-muted">
-          Approve, reject or cancel updates AccessRequestApprovals. ReviewedAt stays empty until you decide.
+          Approve or reject from here. Workers only clock in after you approve.
         </p>
         <div className="sg-table-wrap" style={{ marginTop: 12 }}>
           <table className="sg-table">

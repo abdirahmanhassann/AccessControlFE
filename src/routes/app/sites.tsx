@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Badge, Button, Field, Input, Modal, PageSkeleton, toast } from "@/components/ui";
+import { QrImage } from "@/components/QrImage";
 import { readSession } from "@/lib/session";
 import { useStaffData } from "@/lib/staff-data";
 import { useMounted } from "@/lib/use-mounted";
@@ -28,11 +29,12 @@ function SitesPage() {
       </div>
       <div className="sg-list">
         {data.sites.map((s) => (
-          <button key={s.id} className="sg-list-item" onClick={() => setEdit(s)}>
+          <button key={s.id} className="sg-list-item" onClick={() => setEdit(s)} style={{ gridTemplateColumns: "64px 1fr auto" }}>
+            <QrImage value={s.qrCodeIdentifier || s.reference} size={64} />
             <div>
               <strong>{s.name}</strong>
               <div className="sg-muted">
-                {s.address} · <span className="sg-mono">{s.reference}</span>
+                {s.address} · <span className="sg-mono">{s.qrCodeIdentifier || s.reference}</span>
               </div>
             </div>
             <Badge tone={s.isActive ? "ok" : "muted"}>{s.isActive ? "Active" : "Off"}</Badge>
@@ -41,13 +43,19 @@ function SitesPage() {
       </div>
       {edit ? (
         <SiteForm
-          initial={edit === "new" ? { name: "", address: "", reference: "", isActive: true } : edit}
+          initial={edit === "new" ? { name: "", address: "", reference: "", qrCodeIdentifier: "", isActive: true } : edit}
           onClose={() => setEdit(null)}
           onSave={async (values) => {
             const t = readSession()?.token;
             if (!t) return;
-            if (edit === "new") await api.insertSite(t, values as { name: string; address: string; reference: string });
-            else await api.updateSite(t, { ...(edit as Site), ...values });
+            if (edit === "new") {
+              await api.insertSite(t, {
+                name: String(values.name ?? ""),
+                address: String(values.address ?? ""),
+                reference: String(values.reference ?? ""),
+                qrCodeIdentifier: String(values.qrCodeIdentifier ?? "").trim() || undefined,
+              });
+            } else await api.updateSite(t, { ...(edit as Site), ...values });
             toast("Site saved");
             setEdit(null);
             await reload();
@@ -79,6 +87,13 @@ function SiteForm({
       </Field>
       <Field label="Reference">
         <Input value={v.reference ?? ""} onChange={(e) => setV({ ...v, reference: e.target.value })} />
+      </Field>
+      <Field label="Gate QR code">
+        <Input
+          value={v.qrCodeIdentifier ?? ""}
+          onChange={(e) => setV({ ...v, qrCodeIdentifier: e.target.value.toUpperCase() })}
+          placeholder="SG-RIV-GATE"
+        />
       </Field>
       {initial.id ? (
         <label className="sg-field" style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>

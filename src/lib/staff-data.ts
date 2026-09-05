@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { locationDisplay } from "@/lib/location";
 import { api, asArray } from "@/lib/api/client";
 import type {
   AccessPhoto,
@@ -8,6 +9,7 @@ import type {
   AuditEvent,
   Notification,
   Room,
+  RoomManager,
   Site,
   User,
   WorkArea,
@@ -28,6 +30,7 @@ export type StaffData = {
   audits: AuditEvent[];
   windows: AccessWindow[];
   managers: WorkAreaManager[];
+  roomManagers: RoomManager[];
 };
 
 const EMPTY: StaffData = {
@@ -43,6 +46,7 @@ const EMPTY: StaffData = {
   audits: [],
   windows: [],
   managers: [],
+  roomManagers: [],
 };
 
 function settled<T>(result: PromiseSettledResult<T[]>): T[] {
@@ -71,6 +75,7 @@ export function useStaffData(token: string | undefined, options?: { pollRequests
         api.getAudits(token),
         api.getAccessWindows(token),
         api.getWorkAreaManagers(token),
+        api.getRoomManagers(token).catch(() => [] as RoomManager[]),
       ]);
       const next: StaffData = {
         sites: settled(results[0]),
@@ -85,6 +90,7 @@ export function useStaffData(token: string | undefined, options?: { pollRequests
         audits: settled(results[9]),
         windows: settled(results[10]),
         managers: settled(results[11]),
+        roomManagers: settled(results[12]),
       };
       const failed = results.filter((r) => r.status === "rejected") as PromiseRejectedResult[];
       if (failed.length === results.length) {
@@ -140,10 +146,10 @@ export function useStaffData(token: string | undefined, options?: { pollRequests
 
 export function roomLabel(data: StaffData | null, roomId: number) {
   const room = data?.rooms.find((r) => r.id === roomId);
-  if (!room) return `Room #${roomId}`;
+  if (!room) return `Location #${roomId}`;
   const area = data?.areas.find((a) => a.id === room.workAreaId);
   const site = area ? data?.sites.find((s) => s.id === area.siteId) : undefined;
-  return `${room.roomNumber} · ${room.name}${site ? ` · ${site.name}` : ""}`;
+  return `${locationDisplay(room)}${area ? ` · ${area.name}` : ""}${site ? ` · ${site.name}` : ""}`;
 }
 
 export function workerLabel(data: StaffData | null, workerId: number, fallback?: AccessRequest | AccessRequestApproval | null) {

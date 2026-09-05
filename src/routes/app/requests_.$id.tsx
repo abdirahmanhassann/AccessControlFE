@@ -148,10 +148,18 @@ function RequestDetail() {
             <Badge tone={statusTone(status)}>{status}</Badge>
           </div>
           <dl className="sg-dl">
-            <dt>Room</dt>
-            <dd>{roomLabel(data, req.roomId)}</dd>
+            <dt>Location</dt>
+            <dd>{req.locationLabel || roomLabel(data, req.roomId)}</dd>
+            <dt>Supervisor</dt>
+            <dd>{req.supervisorName || "—"}</dd>
             <dt>Trade</dt>
             <dd>{req.workType || "—"}</dd>
+            <dt>Time frame</dt>
+            <dd>
+              {req.workFrom || req.workTo
+                ? `${whenExact(req.workFrom)} – ${whenExact(req.workTo)}`
+                : "—"}
+            </dd>
             <dt>Reason</dt>
             <dd>{req.reason || "—"}</dd>
             <dt>Notes</dt>
@@ -186,7 +194,7 @@ function RequestDetail() {
           {latest?.id ? (
             <section className="sg-card" style={{ display: "grid", gap: 12 }}>
               <h2>Decision</h2>
-              <p className="sg-muted">Calls AccessRequestApprovalsUpdate with this row's Id and ReviewedAt.</p>
+              <p className="sg-muted">Approve to let them clock in at the gate. Reject with a comment if they should not enter.</p>
               <Field label="Comment to the worker">
                 <Textarea value={comment} onChange={(e) => setComment(e.target.value)} />
               </Field>

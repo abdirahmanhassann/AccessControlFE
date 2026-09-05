@@ -26,8 +26,8 @@ import type { Session } from "@/lib/api/types";
 const NAV = [
   { to: "/app", label: "Overview", icon: LayoutDashboard, exact: true },
   { to: "/app/requests", label: "Requests", icon: ClipboardList },
-  { to: "/app/rooms", label: "Rooms", icon: MapPinned },
-  { to: "/app/areas", label: "Work areas", icon: Building2 },
+  { to: "/app/rooms", label: "Locations", icon: MapPinned },
+  { to: "/app/areas", label: "Towers", icon: Building2 },
   { to: "/app/departments", label: "Departments", icon: Network },
   { to: "/app/sites", label: "Sites", icon: Warehouse },
   { to: "/app/workers", label: "Workers", icon: HardHat },

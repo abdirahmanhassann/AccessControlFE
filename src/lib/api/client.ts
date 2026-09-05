@@ -23,6 +23,7 @@ import type {
   WorkAreaManager,
   Worker,
   WorkerSiteMapping,
+  RoomManager,
 } from "./types";
 
 const DEFAULT_LIVE = "https://localhost:7105";
@@ -254,6 +255,8 @@ function asRoom(data: unknown): ScanQrResult {
     siteName: pickStr(row, ["siteName"]),
     siteId: pickNum(row, ["siteId"]),
     siteAddress: pickStr(row, ["siteAddress"]),
+    locationKind: pickStr(row, ["locationKind"]) || undefined,
+    scanKind: pickStr(row, ["scanKind"]) === "site" ? "site" : id ? "room" : "site",
   };
 }
 
@@ -329,6 +332,11 @@ function asRequestRow(data: unknown): AccessRequest {
     workType: pickStr(row, ["workType"]),
     description: pickStr(row, ["description"]),
     phoneNumber: pickStr(row, ["phoneNumber", "workerPhoneNumber"]),
+    supervisorName: pickStr(row, ["supervisorName"]),
+    workFrom: pickStr(row, ["workFrom"]) || null,
+    workTo: pickStr(row, ["workTo"]) || null,
+    towerName: pickStr(row, ["towerName"]),
+    locationLabel: pickStr(row, ["locationLabel"]),
     approvedAt: pickStr(row, ["approvedAt"]) || null,
     rejectedAt: pickStr(row, ["rejectedAt"]) || null,
     clockedInAt: pickStr(row, ["clockedInAt"]) || null,
@@ -378,6 +386,8 @@ export type ListFilter = {
   id?: number;
   workerId?: number;
   roomId?: number;
+  siteId?: number;
+  workAreaId?: number;
   accessRequestId?: number;
   approverUserId?: number;
   status?: string;
@@ -561,13 +571,16 @@ export const api = {
   scanQr: async (qrCodeIdentifier: string) => {
     const raw = await post<unknown>("/Access/scanqr", { qrCodeIdentifier });
     const room = await resolveRoom(qrCodeIdentifier, raw);
+    if (room.scanKind === "site" || (room.siteId && !room.id)) {
+      return { ...room, scanKind: "site" as const };
+    }
     if (!room.id) {
       throw new ApiError(
         400,
-        "QR was accepted but AccessControl did not return a room id. Scan a room QR that exists in the database.",
+        "QR was accepted but AccessControl did not return a room or site id. Scan the gate QR for this site.",
       );
     }
-    return room;
+    return { ...room, scanKind: "room" as const };
   },
 
   getSites: (token: string) => post<Site[]>("/Access/getsites", { token }).then(asArray<Site>),
@@ -575,8 +588,23 @@ export const api = {
     post<Site | null>("/Access/insertsite", { token, ...data }),
   updateSite: (token: string, data: Site) => post<Site | null>("/Access/updatesite", { token, ...data }),
 
-  getWorkAreas: (token: string) =>
-    post<WorkArea[]>("/Access/getworkareas", { token }).then(asArray<WorkArea>),
+  getWorkAreas: (token: string, siteId?: number) =>
+    post<WorkArea[]>("/Access/getworkareas", { token, siteId, SiteId: siteId }).then(asArray<WorkArea>),
+  listTowers: async (siteId: number) =>
+    asArray<WorkArea>(
+      await post("/Access/getworkareas", { siteId, SiteId: siteId }),
+    ).filter((a) => a.id && a.isActive !== false && (!siteId || a.siteId === siteId || !a.siteId)),
+  listLocations: async (opts: { workAreaId?: number; siteId?: number }) =>
+    asArray<unknown>(
+      await post("/Access/getrooms", {
+        workAreaId: opts.workAreaId,
+        WorkAreaId: opts.workAreaId,
+        siteId: opts.siteId,
+        SiteId: opts.siteId,
+      }),
+    )
+      .map((row) => asRoom(row))
+      .filter((r) => r.id && r.isActive !== false),
   insertWorkArea: (token: string, data: Omit<WorkArea, "id" | "isActive">) =>
     post<WorkArea | null>("/Access/insertworkarea", { token, ...data }),
   updateWorkArea: (token: string, data: WorkArea) =>
@@ -617,8 +645,20 @@ export const api = {
   updateWorkAreaManager: (token: string, data: WorkAreaManager) =>
     post<WorkAreaManager | null>("/Access/updateworkareamanager", { token, ...data }),
 
-  getDepartments: (token: string) =>
-    post("/Access/getdepartments", { token }).then((data) => asArray<unknown>(data).map(asDepartment)),
+  getDepartments: (token: string, siteId?: number) =>
+    post("/Access/getdepartments", { token, siteId, SiteId: siteId }).then((data) =>
+      asArray<unknown>(data).map(asDepartment),
+    ),
+  listDepartments: async (siteId: number) =>
+    asArray<unknown>(
+      await post("/Access/getdepartments", {
+        token: readWorkerSession()?.token || readSession()?.token || "",
+        siteId,
+        SiteId: siteId,
+      }),
+    )
+      .map(asDepartment)
+      .filter((d) => d.id && d.name && d.isActive !== false && (!siteId || !d.siteId || d.siteId === siteId)),
   listDepartmentsForRoom: async (roomId: number) =>
     asArray<unknown>(await post("/Access/getdepartmentsforroom", { roomId, RoomId: roomId }))
       .map(asDepartment)
@@ -672,9 +712,24 @@ export const api = {
     asArray<unknown>(await post("/Access/getrooms", { token })).map((row) => asRoom(row)),
   insertRoom: (
     token: string,
-    data: { workAreaId: number; roomNumber: string; name: string; description: string },
+    data: {
+      workAreaId: number;
+      roomNumber: string;
+      name: string;
+      description: string;
+      locationKind?: string;
+    },
   ) => post<Room | null>("/Access/insertroom", { token, ...data }),
   updateRoom: (token: string, data: Room) => post<Room | null>("/Access/updateroom", { token, ...data }),
+
+  getRoomManagers: (token: string) =>
+    post<RoomManager[]>("/Access/getroommanagers", { token }).then(asArray<RoomManager>),
+  insertRoomManager: (token: string, data: { roomId: number; managerUserId: number; isPrimary?: boolean }) =>
+    post("/Access/insertroommanager", dual({ token, ...data, isPrimary: data.isPrimary ?? true })),
+  updateRoomManager: (
+    token: string,
+    data: { id: number; roomId: number; managerUserId: number; isPrimary?: boolean },
+  ) => post("/Access/updateroommanager", dual({ token, ...data })),
 
   getAccessWindows: (token: string) =>
     post<AccessWindow[]>("/Access/getaccesswindows", { token }).then(asArray<AccessWindow>),
@@ -696,13 +751,16 @@ export const api = {
     reason: string;
     workType: string;
     description: string;
+    supervisorName?: string;
+    workFrom?: string;
+    workTo?: string;
     qrCodeIdentifier?: string;
     approverUserId?: number;
   }) => {
     const roomId = num(data.roomId);
     const workerId = num(data.workerId);
     if (!roomId) {
-      throw new ApiError(400, "Room id is missing. Scan the room QR again.");
+      throw new ApiError(400, "Choose the apartment or riser before sending.");
     }
     const payload: Record<string, unknown> = {
       phoneNumber: data.phoneNumber,
@@ -717,6 +775,12 @@ export const api = {
       WorkType: data.workType,
       description: data.description,
       Description: data.description,
+      supervisorName: data.supervisorName ?? "",
+      SupervisorName: data.supervisorName ?? "",
+      workFrom: data.workFrom ?? "",
+      WorkFrom: data.workFrom ?? "",
+      workTo: data.workTo ?? "",
+      WorkTo: data.workTo ?? "",
     };
     if (data.qrCodeIdentifier) {
       payload.qrCodeIdentifier = data.qrCodeIdentifier;

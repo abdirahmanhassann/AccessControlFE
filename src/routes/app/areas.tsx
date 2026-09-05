@@ -23,7 +23,7 @@ function AreasPage() {
       {error ? <p className="sg-error">{error}</p> : null}
       <div className="sg-toolbar">
         <Button variant="primary" onClick={() => setEdit("new")}>
-          Add work area
+          Add tower
         </Button>
       </div>
       <div className="sg-list">
@@ -66,7 +66,7 @@ function AreasPage() {
             } else {
               await api.updateWorkArea(t, { ...(edit as WorkArea), ...values } as WorkArea);
             }
-            toast("Work area saved");
+            toast("Tower saved");
             setEdit(null);
             await reload();
           }}
@@ -90,7 +90,7 @@ function AreaForm({
   const [v, setV] = useState(initial);
   const [busy, setBusy] = useState(false);
   return (
-    <Modal title={initial.id ? "Edit work area" : "New work area"} onClose={onClose}>
+    <Modal title={initial.id ? "Edit tower" : "New tower"} onClose={onClose}>
       <Field label="Site">
         <Select value={String(v.siteId ?? "")} onChange={(e) => setV({ ...v, siteId: Number(e.target.value) })}>
           {sites.map((s) => (

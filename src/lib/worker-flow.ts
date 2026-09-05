@@ -15,6 +15,9 @@ export type WorkerStep =
 type WorkerFlow = {
   step: WorkerStep;
   qrCodeIdentifier: string;
+  siteId: number;
+  siteName: string;
+  siteAddress: string;
   room: ScanQrResult | null;
   phoneNumber: string;
   otpCode: string;
@@ -30,6 +33,9 @@ type WorkerFlow = {
 const empty = {
   step: "scan" as WorkerStep,
   qrCodeIdentifier: "",
+  siteId: 0,
+  siteName: "",
+  siteAddress: "",
   room: null,
   phoneNumber: "",
   otpCode: "",
@@ -47,6 +53,6 @@ export const useWorkerFlow = create<WorkerFlow>()(
       startWithQr: (qr) => set({ ...empty, qrCodeIdentifier: qr, step: "scan" }),
       reset: () => set(empty),
     }),
-    { name: "sitegate.worker-flow", version: 2 },
+    { name: "sitegate.worker-flow", version: 4 },
   ),
 );

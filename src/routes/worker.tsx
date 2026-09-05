@@ -13,29 +13,27 @@ import {
 import { BrandMark, Button, Field, Input, Select, Textarea, toast } from "@/components/ui";
 import { QrImage } from "@/components/QrImage";
 import { api, USE_MOCK } from "@/lib/api/client";
-import { ApiError, PHOTO_TYPES, type AccessRequest, type Department, type Room, type User } from "@/lib/api/types";
+import { ApiError, PHOTO_TYPES, WORK_TYPES, type AccessRequest, type Department, type Room, type ScanQrResult, type User, type WorkArea } from "@/lib/api/types";
 import { compressImage } from "@/lib/image";
 import { writeWorkerSession, readWorkerSession, readSession, clearWorkerSession } from "@/lib/session";
 import { useWorkerFlow } from "@/lib/worker-flow";
 import { prettyPhone, whenExact } from "@/lib/format";
+import { locationDisplay, matchEnteredRoom } from "@/lib/location";
 import { useMounted } from "@/lib/use-mounted";
 
-const DEMO_ROOMS = [
-  { qr: "SG-RIV-A101", room: "A-101", name: "Plant room", site: "Riverside Tower" },
-  { qr: "SG-RIV-A204", room: "A-204", name: "Electrical riser", site: "Riverside Tower" },
-  { qr: "SG-RIV-GF12", room: "GF-12", name: "Comms room", site: "Riverside Tower", note: "Demo clock-out for 07700 900123" },
-  { qr: "SG-RIV-A310", room: "A-310", name: "Roof access", site: "Riverside Tower" },
-  { qr: "SG-OAK-NW04", room: "NW-04", name: "Plant corridor", site: "Oakridge Mixed-Use" },
+const DEMO_SITES = [
+  { qr: "SG-RIV-GATE", name: "Riverside", note: "Tower 1 + Tower 2. Demo clock-out: 07700 900123" },
+  { qr: "SG-OAK-GATE", name: "Oakridge Mixed-Use", note: "Tower A" },
 ];
 
 const STEPS = ["scan", "phone", "otp", "form", "waiting", "visit", "clockout", "done"] as const;
 
-function isOpenVisit(req: AccessRequest | null | undefined, roomId?: number) {
+function isOpenVisit(req: AccessRequest | null | undefined, siteRoomIds?: number[]) {
   if (!req) return false;
   if (req.clockedOutAt || req.completedAt) return false;
   if (/^completed$/i.test(String(req.status))) return false;
   if (!/^approved$/i.test(String(req.status))) return false;
-  if (roomId && req.roomId && req.roomId !== roomId) return false;
+  if (siteRoomIds?.length && req.roomId && !siteRoomIds.includes(req.roomId)) return false;
   return true;
 }
 
@@ -47,11 +45,13 @@ async function loadWorkerRequests(opts: {
   token?: string;
   workerId?: number;
   roomId?: number;
+  siteId?: number;
   phone?: string;
 }) {
-  const filters: Array<{ workerId?: number; roomId?: number; take: number }> = [];
-  if (opts.workerId) filters.push({ workerId: opts.workerId, roomId: opts.roomId || undefined, take: 50 });
+  const filters: Array<{ workerId?: number; roomId?: number; siteId?: number; take: number }> = [];
+  if (opts.workerId) filters.push({ workerId: opts.workerId, siteId: opts.siteId || undefined, take: 50 });
   if (opts.workerId) filters.push({ workerId: opts.workerId, take: 50 });
+  if (opts.siteId) filters.push({ siteId: opts.siteId, take: 50 });
   if (opts.roomId) filters.push({ roomId: opts.roomId, take: 50 });
   const phone = digits(opts.phone);
   const seen = new Set<number>();
@@ -73,6 +73,26 @@ async function loadWorkerRequests(opts: {
     if (matched.length) return matched;
   }
   return rows;
+}
+
+async function locationForRequest(
+  roomId: number | undefined,
+  site: { siteId?: number; siteName?: string; siteAddress?: string },
+): Promise<ScanQrResult | null> {
+  if (!roomId || !site.siteId) return null;
+  const rooms = await api.listLocations({ siteId: site.siteId }).catch(() => []);
+  const room = rooms.find((r) => r.id === roomId);
+  if (!room) return null;
+  const towers = await api.listTowers(site.siteId).catch(() => []);
+  const tower = towers.find((t) => t.id === room.workAreaId);
+  return {
+    ...room,
+    workAreaName: tower?.name ?? "",
+    siteName: site.siteName ?? "",
+    siteId: site.siteId,
+    siteAddress: site.siteAddress ?? "",
+    scanKind: "room",
+  };
 }
 
 export const Route = createFileRoute("/worker")({
@@ -154,16 +174,22 @@ function ScanStep() {
   const [camError, setCamError] = useState("");
   const videoRef = useRef<HTMLVideoElement>(null);
   const [camOn, setCamOn] = useState(false);
-  const [liveRooms, setLiveRooms] = useState<Room[]>([]);
+  const [liveSites, setLiveSites] = useState<Array<{ qr: string; name: string; note?: string }>>([]);
 
   useEffect(() => {
     if (USE_MOCK) return;
     const token = readSession()?.token;
     if (!token) return;
     void api
-      .getRooms(token)
-      .then((rows) => setLiveRooms(rows.filter((r) => r.isActive !== false && r.qrCodeIdentifier)))
-      .catch(() => setLiveRooms([]));
+      .getSites(token)
+      .then((rows) =>
+        setLiveSites(
+          rows
+            .filter((s) => s.isActive !== false && s.qrCodeIdentifier)
+            .map((s) => ({ qr: s.qrCodeIdentifier || "", name: s.name, note: s.address })),
+        ),
+      )
+      .catch(() => setLiveSites([]));
   }, []);
 
   async function go(qr: string) {
@@ -171,8 +197,16 @@ function ScanStep() {
     setError("");
     try {
       const code = qr.trim();
-      const room = await api.scanQr(code);
-      flow.set({ qrCodeIdentifier: code, room, step: "phone" });
+      const scanned = await api.scanQr(code);
+      const isSite = scanned.scanKind === "site" || (scanned.siteId && !scanned.id);
+      flow.set({
+        qrCodeIdentifier: code,
+        room: isSite ? null : scanned,
+        siteId: scanned.siteId,
+        siteName: scanned.siteName,
+        siteAddress: scanned.siteAddress,
+        step: "phone",
+      });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "QR not recognised.");
     } finally {
@@ -193,7 +227,7 @@ function ScanStep() {
       setCamOn(true);
       const Detector = (window as unknown as { BarcodeDetector?: new (o: { formats: string[] }) => { detect: (s: ImageBitmapSource) => Promise<Array<{ rawValue: string }>> } }).BarcodeDetector;
       if (!Detector) {
-        setCamError("This browser cannot read QR from camera. Pick a demo room or type the code.");
+        setCamError("This browser cannot read QR from camera. Pick a demo site or type the code.");
         return;
       }
       const detector = new Detector({ formats: ["qr_code"] });
@@ -214,14 +248,14 @@ function ScanStep() {
       };
       void tick();
     } catch {
-      setCamError("Camera is blocked in this preview. Use a demo room below.");
+      setCamError("Camera is blocked in this preview. Use a demo site below.");
     }
   }
 
   return (
     <>
-      <h1>Scan the room QR</h1>
-      <p className="sg-muted">Point at the code on the door, or pick a demo room on this site.</p>
+      <h1>Scan the site QR</h1>
+      <p className="sg-muted">Point at the code at the gate. You pick the tower, department, and room on the next form.</p>
       {error ? <p className="sg-error">{error}</p> : null}
       <video
         ref={videoRef}
@@ -237,40 +271,31 @@ function ScanStep() {
         <Input
           value={manual}
           onChange={(e) => setManual(e.target.value.toUpperCase())}
-          placeholder="SG-RIV-A101"
+          placeholder="SG-RIV-GATE"
         />
       </Field>
       <Button variant="primary" block disabled={busy || !manual.trim()} onClick={() => void go(manual)}>
         {busy ? "Looking up…" : "Continue"}
       </Button>
       <p className="sg-label" style={{ marginTop: 8 }}>
-        {USE_MOCK ? "Demo rooms" : "Rooms from AccessControl"}
+        {USE_MOCK ? "Demo sites" : "Sites from AccessControl"}
       </p>
       <div className="sg-room-grid">
-        {(USE_MOCK ? DEMO_ROOMS : liveRooms.map((r) => ({
-          qr: r.qrCodeIdentifier,
-          room: r.roomNumber,
-          name: r.name,
-          site: "",
-          note: r.qrCodeIdentifier,
-        }))).map((r) => (
+        {(USE_MOCK ? DEMO_SITES : liveSites).map((r) => (
           <button key={r.qr} className="sg-room-pick" onClick={() => void go(r.qr)} disabled={busy}>
             <QrImage value={r.qr} size={64} />
             <div>
-              <strong>
-                {r.room} {r.name}
-              </strong>
-              <div className="sg-muted">{r.site}</div>
+              <strong>{r.name}</strong>
+              <div className="sg-muted">{r.qr}</div>
               {r.note ? <div className="sg-help">{r.note}</div> : null}
             </div>
             <QrCode size={16} />
           </button>
         ))}
       </div>
-      {!USE_MOCK && !liveRooms.length ? (
+      {!USE_MOCK && !liveSites.length ? (
         <p className="sg-help">
-          Demo codes like SG-RIV-A101 are not in your database. Sign in as a manager, add a room
-          under Rooms, then scan that QR here.
+          Sign in as a manager, add a gate QR on the site, then scan that code here.
         </p>
       ) : null}
     </>
@@ -307,14 +332,10 @@ function PhoneStep() {
     <form onSubmit={send} className="sg-form-grid">
       <h1>Your mobile number</h1>
       <p className="sg-muted">We send a one-time code to this number.</p>
-      {flow.room ? (
+      {flow.siteName ? (
         <div className="sg-room-chip">
-          <strong>
-            {flow.room.roomNumber} {flow.room.name}
-          </strong>
-          <small>
-            {flow.room.siteName} · {flow.room.workAreaName}
-          </small>
+          <strong>{flow.siteName}</strong>
+          <small>{flow.siteAddress}</small>
         </div>
       ) : null}
       <Field label="Phone" error={error}>
@@ -377,17 +398,28 @@ function OtpStep() {
       });
       const session = readWorkerSession();
       const token = session?.token || result.token || "";
-      const roomId = Number(flow.room?.id ?? (flow.room as { roomId?: number } | null)?.roomId ?? 0);
+      const siteId = flow.siteId || flow.room?.siteId || 0;
+      const siteRooms = siteId ? await api.listLocations({ siteId }).catch(() => []) : [];
+      const siteRoomIds = siteRooms.map((r) => r.id);
       const requests = await loadWorkerRequests({
         token,
         workerId: worker.id || undefined,
-        roomId: roomId || undefined,
+        siteId: siteId || undefined,
         phone: result.phoneNumber || flow.phoneNumber,
       });
-      const activePending = requests.find(
-        (r) => (!roomId || r.roomId === roomId) && /^pending$/i.test(String(r.status)),
-      );
-      const openVisit = requests.find((r) => isOpenVisit(r, roomId || undefined));
+      const activePending = requests.find((r) => /^pending$/i.test(String(r.status)));
+      const openVisit = requests.find((r) => isOpenVisit(r, siteRoomIds));
+      const attached = await locationForRequest(activePending?.roomId || openVisit?.roomId, {
+        siteId,
+        siteName: flow.siteName || flow.room?.siteName || "",
+        siteAddress: flow.siteAddress || flow.room?.siteAddress || "",
+      });
+      flow.set({
+        siteId: siteId || flow.siteId,
+        siteName: flow.siteName || flow.room?.siteName || "",
+        siteAddress: flow.siteAddress || flow.room?.siteAddress || "",
+        room: attached || flow.room,
+      });
       if (activePending) {
         flow.set({ worker, request: activePending, mode: "waiting", step: "waiting" });
       } else if (openVisit) {
@@ -436,115 +468,160 @@ function OtpStep() {
   );
 }
 
+function todayIsoDate() {
+  const d = new Date();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+function toDateTime(date: string, time: string) {
+  if (!date || !time) return "";
+  return `${date}T${time}:00`;
+}
+
 function FormStep() {
   const flow = useWorkerFlow();
   const [form, setForm] = useState({
     firstName: flow.worker?.firstName ?? "",
     lastName: flow.worker?.lastName ?? "",
     companyName: flow.worker?.companyName ?? "",
+    supervisorName: "",
     workType: "",
-    departmentId: 0,
+    workDate: todayIsoDate(),
+    workFrom: "08:00",
+    workTo: "17:00",
+    towerId: flow.room?.workAreaId ? String(flow.room.workAreaId) : "",
+    departmentId: "",
+    roomText: flow.room?.roomNumber || flow.room?.name || "",
+    locationId: flow.room?.id ? String(flow.room.id) : "",
     reason: "First fix",
     description: "",
     approverUserId: "",
   });
-  const [managers, setManagers] = useState<User[]>([]);
+  const [towers, setTowers] = useState<WorkArea[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
+  const [locations, setLocations] = useState<Room[]>([]);
+  const [managers, setManagers] = useState<User[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [openVisit, setOpenVisit] = useState<AccessRequest | null>(null);
+  const siteId = flow.siteId || flow.room?.siteId || 0;
+  const matchedRoom = matchEnteredRoom(locations, form.roomText);
 
   useEffect(() => {
-    const roomId = Number(flow.room?.id ?? 0);
-    const workerId = flow.worker?.id;
-    if (!roomId && !workerId) return;
+    if (!siteId) return;
     let cancelled = false;
-    void loadWorkerRequests({
-      token: readWorkerSession()?.token,
-      workerId,
-      roomId: roomId || undefined,
-      phone: flow.phoneNumber,
-    })
-      .then((rows) => {
+    void Promise.all([api.listTowers(siteId), api.listDepartments(siteId)])
+      .then(([towerRows, deptRows]) => {
         if (cancelled) return;
-        const hit = rows.find((r) => isOpenVisit(r, roomId || undefined));
-        setOpenVisit(hit ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setOpenVisit(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [flow.room?.id, flow.worker?.id]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const roomId = flow.room?.id;
-    if (!roomId) {
-      setDepartments([]);
-      return;
-    }
-    void api
-      .listDepartmentsForRoom(roomId)
-      .then((departmentRows) => {
-        if (cancelled) return;
-        setDepartments(departmentRows);
+        setTowers(towerRows);
+        setDepartments(deptRows);
         setForm((prev) => {
-          const selected =
-            departmentRows.find((d) => d.id === prev.departmentId) ?? departmentRows[0];
+          const towerOk = prev.towerId && towerRows.some((t) => String(t.id) === prev.towerId);
+          const deptOk = prev.departmentId && deptRows.some((d) => String(d.id) === prev.departmentId);
+          if (towerOk && deptOk) return prev;
           return {
             ...prev,
-            departmentId: selected?.id ?? 0,
-            workType: selected?.name ?? "",
+            towerId: towerOk ? prev.towerId : "",
+            departmentId: deptOk ? prev.departmentId : "",
+            locationId: towerOk ? prev.locationId : "",
+            roomText: towerOk ? prev.roomText : "",
+            approverUserId: towerOk && deptOk ? prev.approverUserId : "",
           };
         });
       })
       .catch(() => {
-        if (!cancelled) setDepartments([]);
+        if (cancelled) return;
+        setTowers([]);
+        setDepartments([]);
       });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flow.room?.id]);
+  }, [siteId]);
 
   useEffect(() => {
+    const towerId = Number(form.towerId);
+    if (!towerId) {
+      setLocations([]);
+      return;
+    }
     let cancelled = false;
-    const roomId = flow.room?.id;
-    const departmentId = form.departmentId;
-    if (!roomId || !departmentId) {
+    void api.listLocations({ workAreaId: towerId }).then((rows) => {
+      if (cancelled) return;
+      setLocations(rows);
+      setForm((prev) => {
+        const stillThere = prev.locationId && rows.some((r) => String(r.id) === prev.locationId);
+        if (stillThere) return prev;
+        return { ...prev, locationId: "", roomText: prev.towerId === String(towerId) ? prev.roomText : "", approverUserId: "" };
+      });
+    }).catch(() => {
+      if (!cancelled) setLocations([]);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [form.towerId]);
+
+  useEffect(() => {
+    const nextId = matchedRoom ? String(matchedRoom.id) : "";
+    setForm((prev) => (prev.locationId === nextId ? prev : { ...prev, locationId: nextId, approverUserId: "" }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matchedRoom?.id, form.roomText]);
+
+  useEffect(() => {
+    const locationId = Number(form.locationId);
+    const departmentId = Number(form.departmentId);
+    if (!locationId || !departmentId) {
       setManagers([]);
       return;
     }
-    void api
-      .listManagers(roomId, departmentId)
-      .then((managerRows) => {
-        if (cancelled) return;
-        const forDepartment = managerRows.filter(
-          (m) => !m.departmentId || m.departmentId === departmentId,
-        );
-        setManagers(forDepartment);
-        setForm((prev) => ({
-          ...prev,
-          approverUserId: forDepartment.some((m) => String(m.id) === prev.approverUserId)
-            ? prev.approverUserId
-            : forDepartment[0]
-              ? String(forDepartment[0].id)
-              : "",
-        }));
-      })
-      .catch(() => {
-        if (!cancelled) setManagers([]);
-      });
+    let cancelled = false;
+    void api.listManagers(locationId, departmentId).then((rows) => {
+      if (cancelled) return;
+      setManagers(rows);
+      setForm((prev) => ({
+        ...prev,
+        approverUserId: rows.some((m) => String(m.id) === prev.approverUserId)
+          ? prev.approverUserId
+          : rows[0]
+            ? String(rows[0].id)
+            : "",
+      }));
+    }).catch(() => {
+      if (!cancelled) setManagers([]);
+    });
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flow.room?.id, form.departmentId]);
+  }, [form.locationId, form.departmentId]);
 
   useEffect(() => {
-    if (flow.room?.id) return;
+    const workerId = flow.worker?.id;
+    if (!siteId && !workerId) return;
+    let cancelled = false;
+    void (async () => {
+      const siteRooms = siteId ? await api.listLocations({ siteId }).catch(() => []) : [];
+      const rows = await loadWorkerRequests({
+        token: readWorkerSession()?.token,
+        workerId,
+        siteId: siteId || undefined,
+        phone: flow.phoneNumber,
+      });
+      if (cancelled) return;
+      const hit = rows.find((r) => isOpenVisit(r, siteRooms.map((x) => x.id)));
+      setOpenVisit(hit ?? null);
+    })().catch(() => {
+      if (!cancelled) setOpenVisit(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [siteId, flow.worker?.id]);
+
+  useEffect(() => {
+    if (flow.siteId || flow.room?.id) return;
     const qr = flow.qrCodeIdentifier.trim();
     if (!qr) {
       flow.set({ step: "scan" });
@@ -553,9 +630,16 @@ function FormStep() {
     let cancelled = false;
     void (async () => {
       try {
-        const room = await api.scanQr(qr);
-        if (!cancelled && room.id) flow.set({ room, qrCodeIdentifier: qr });
-        else if (!cancelled) flow.set({ step: "scan" });
+        const scanned = await api.scanQr(qr);
+        if (cancelled) return;
+        const isSite = scanned.scanKind === "site" || (scanned.siteId && !scanned.id);
+        flow.set({
+          room: isSite ? null : scanned,
+          siteId: scanned.siteId,
+          siteName: scanned.siteName,
+          siteAddress: scanned.siteAddress,
+          qrCodeIdentifier: qr,
+        });
       } catch {
         if (!cancelled) flow.set({ step: "scan" });
       }
@@ -566,34 +650,40 @@ function FormStep() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const selectedLocation = matchedRoom || locations.find((r) => String(r.id) === form.locationId);
+  const selectedTower = towers.find((t) => String(t.id) === form.towerId);
+  const selectedDepartment = departments.find((d) => String(d.id) === form.departmentId);
+
   async function submit(e: FormEvent) {
     e.preventDefault();
-    let roomId = Number(flow.room?.id ?? (flow.room as { roomId?: number } | null)?.roomId ?? 0);
-    const qr = flow.qrCodeIdentifier.trim();
-    if (!roomId && qr) {
-      try {
-        const room = await api.scanQr(qr);
-        roomId = room.id;
-        if (room.id) flow.set({ room });
-      } catch {
-        /* fall through to the missing-room error */
-      }
-    }
-    if (!roomId) {
-      setError("Room is missing. Go back and scan a QR that exists in AccessControl.");
+    if (!form.towerId) {
+      setError("Choose the tower.");
       return;
     }
+    if (!form.departmentId) {
+      setError("Choose the department.");
+      return;
+    }
+    const roomId = selectedLocation?.id || Number(form.locationId);
     const approverUserId = Number(form.approverUserId);
+    if (!roomId) {
+      setError("Enter a room that exists in this tower — apartment number or riser, for example 13.2.");
+      return;
+    }
     if (!approverUserId) {
       setError("Choose the manager who should approve this request.");
       return;
     }
-    if (!form.workType || !form.departmentId) {
-      setError("Choose a department for this room.");
+    if (!managers.some((m) => m.id === approverUserId)) {
+      setError("Choose a manager responsible for that department.");
       return;
     }
-    if (!departmentManagers.some((m) => m.id === approverUserId)) {
-      setError("Choose a manager from the selected department.");
+    if (!form.workType) {
+      setError("Choose the type of job.");
+      return;
+    }
+    if (form.workFrom && form.workTo && form.workTo <= form.workFrom) {
+      setError("The 'to' time must be after the start time.");
       return;
     }
     setBusy(true);
@@ -619,6 +709,8 @@ function FormStep() {
           },
         });
       }
+      const workFrom = toDateTime(form.workDate, form.workFrom);
+      const workTo = toDateTime(form.workDate, form.workTo);
       const request = await api.insertAccessRequest({
         phoneNumber: flow.phoneNumber,
         workerId: worker.id,
@@ -626,9 +718,22 @@ function FormStep() {
         reason: form.reason,
         workType: form.workType,
         description: form.description,
-        qrCodeIdentifier: qr || flow.room?.qrCodeIdentifier,
+        supervisorName: form.supervisorName,
+        workFrom,
+        workTo,
+        qrCodeIdentifier: flow.qrCodeIdentifier,
         approverUserId,
       });
+      const picked = selectedLocation
+        ? {
+            ...selectedLocation,
+            workAreaName: selectedTower?.name ?? "",
+            siteName: flow.siteName,
+            siteId,
+            siteAddress: flow.siteAddress,
+            scanKind: "room" as const,
+          }
+        : flow.room;
       const token = readWorkerSession()?.token;
       if (token && request.id) {
         try {
@@ -647,15 +752,20 @@ function FormStep() {
             accessRequestId: request.id,
             workerId: worker.id,
             eventType: "AccessRequested",
-            description: `${worker.firstName} ${worker.lastName} submitted access for ${flow.room?.roomNumber || "room"} to ${manager ? `${manager.firstName} ${manager.lastName}` : `manager #${approverUserId}`}.`,
-            metadata: JSON.stringify({ approverUserId, roomId }),
+            description: `${worker.firstName} ${worker.lastName} submitted access for ${locationDisplay(selectedLocation)} to ${manager ? `${manager.firstName} ${manager.lastName}` : `manager #${approverUserId}`}.`,
+            metadata: JSON.stringify({
+              approverUserId,
+              roomId,
+              towerId: Number(form.towerId),
+              departmentId: Number(form.departmentId),
+            }),
           });
         } catch {
           /* audit is best-effort */
         }
       }
-      flow.set({ worker, request, mode: "waiting", step: "waiting" });
-      toast("Request sent to the chosen manager");
+      flow.set({ worker, request, room: picked, mode: "waiting", step: "waiting" });
+      toast("Request sent. Waiting for a response.");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not submit.");
     } finally {
@@ -663,24 +773,18 @@ function FormStep() {
     }
   }
 
-  const departmentManagers = form.departmentId
-    ? managers.filter((m) => !m.departmentId || m.departmentId === form.departmentId)
-    : [];
-
   return (
     <form onSubmit={submit} className="sg-form-grid">
       <h1>Access request</h1>
-      {flow.room ? (
+      {flow.siteName ? (
         <div className="sg-room-chip">
-          <strong>
-            {flow.room.roomNumber} {flow.room.name}
-          </strong>
-          <small>{flow.room.description}</small>
+          <strong>{flow.siteName}</strong>
+          <small>{flow.siteAddress || "Pick tower, department, then enter the room."}</small>
         </div>
       ) : null}
       {openVisit ? (
         <div className="sg-room-chip">
-          <strong>You already have an approved visit here</strong>
+          <strong>You already have an approved visit on this site</strong>
           <small>Clock in or sign out instead of sending a new request.</small>
           <div className="sg-actions" style={{ marginTop: 8 }}>
             <Button
@@ -702,29 +806,93 @@ function FormStep() {
           <Input value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} required />
         </Field>
       </div>
-      <Field label="Company">
+      <Field label="Company they work for">
         <Input value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} required />
       </Field>
+      <Field label="Their supervisor">
+        <Input
+          value={form.supervisorName}
+          onChange={(e) => setForm({ ...form, supervisorName: e.target.value })}
+          placeholder="Name of their supervisor"
+          required
+        />
+      </Field>
+      <Field label="Type of job">
+        <Select
+          value={form.workType}
+          onChange={(e) => setForm({ ...form, workType: e.target.value })}
+          required
+        >
+          <option value="">Select job type</option>
+          {WORK_TYPES.map((t) => (
+            <option key={t} value={t}>
+              {t}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Field label="Date on site">
+        <Input
+          type="date"
+          value={form.workDate}
+          onChange={(e) => setForm({ ...form, workDate: e.target.value })}
+          required
+        />
+      </Field>
+      <div className="sg-form-grid two">
+        <Field label="From">
+          <Input
+            type="time"
+            value={form.workFrom}
+            onChange={(e) => setForm({ ...form, workFrom: e.target.value })}
+            required
+          />
+        </Field>
+        <Field label="To">
+          <Input
+            type="time"
+            value={form.workTo}
+            onChange={(e) => setForm({ ...form, workTo: e.target.value })}
+            required
+          />
+        </Field>
+      </div>
       <Field
-        label="Work type"
+        label="Which tower"
+        hint={towers.length ? "Towers on this site." : "No towers loaded for this site yet."}
+      >
+        <Select
+          value={form.towerId}
+          onChange={(e) =>
+            setForm({
+              ...form,
+              towerId: e.target.value,
+              locationId: "",
+              roomText: "",
+              approverUserId: "",
+            })
+          }
+          required
+        >
+          <option value="">Select tower</option>
+          {towers.map((t) => (
+            <option key={t.id} value={t.id}>
+              {t.name}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      <Field
+        label="Department"
         hint={
           departments.length
-            ? "Departments assigned to this room."
-            : "No departments are mapped to this room yet."
+            ? "Trade that owns this visit. That department’s manager will approve."
+            : "No departments loaded for this site yet."
         }
       >
         <Select
-          value={form.departmentId ? String(form.departmentId) : ""}
-          onChange={(e) => {
-            const departmentId = Number(e.target.value);
-            const dept = departments.find((d) => d.id === departmentId);
-            setForm({
-              ...form,
-              departmentId,
-              workType: dept?.name ?? "",
-              approverUserId: "",
-            });
-          }}
+          value={form.departmentId}
+          onChange={(e) => setForm({ ...form, departmentId: e.target.value, approverUserId: "" })}
           required
         >
           <option value="">Select department</option>
@@ -735,10 +903,34 @@ function FormStep() {
           ))}
         </Select>
       </Field>
-      <Field label="Reason">
-        <Input value={form.reason} onChange={(e) => setForm({ ...form, reason: e.target.value })} required />
+      <Field
+        label="Room"
+        hint={
+          !form.towerId
+            ? "Choose a tower first."
+            : selectedLocation
+              ? locationDisplay(selectedLocation)
+              : "Type the apartment or riser number, for example 13.2 or E2.00.21."
+        }
+      >
+        <Input
+          value={form.roomText}
+          list="sg-tower-rooms"
+          onChange={(e) => setForm({ ...form, roomText: e.target.value, approverUserId: "" })}
+          placeholder="e.g. 13.2"
+          required
+          disabled={!form.towerId}
+          autoComplete="off"
+        />
       </Field>
-      <Field label="What are you doing in the room?">
+      <datalist id="sg-tower-rooms">
+        {locations.map((r) => (
+          <option key={r.id} value={r.roomNumber}>
+            {locationDisplay(r)}
+          </option>
+        ))}
+      </datalist>
+      <Field label="What are you doing?">
         <Textarea
           value={form.description}
           onChange={(e) => setForm({ ...form, description: e.target.value })}
@@ -748,28 +940,33 @@ function FormStep() {
       <Field
         label="Manager to approve"
         hint={
-          departmentManagers.length
-            ? "Managers for the selected department."
-            : departments.length
-              ? "No manager is mapped to that department."
-              : "No managers loaded for this room."
+          !form.departmentId
+            ? "Choose a department first."
+            : !form.locationId
+              ? "Enter the room so we can load the manager for that department."
+              : managers.length
+                ? selectedDepartment
+                  ? `Managers for ${selectedDepartment.name}.`
+                  : "Managers for this department."
+                : "No manager is mapped to that department yet."
         }
       >
         <Select
           value={form.approverUserId}
           onChange={(e) => setForm({ ...form, approverUserId: e.target.value })}
           required
+          disabled={!form.locationId || !form.departmentId}
         >
           <option value="">Select a manager</option>
-          {departmentManagers.map((m) => (
-            <option key={`${m.id}-${m.departmentId ?? m.departmentName ?? ""}`} value={m.id}>
-              {`${m.firstName} ${m.lastName}`.trim() || m.email} {m.role ? `· ${m.role}` : ""}
+          {managers.map((m) => (
+            <option key={m.id} value={m.id}>
+              {`${m.firstName} ${m.lastName}`.trim() || m.email}
             </option>
           ))}
         </Select>
       </Field>
       <Button variant="primary" block disabled={busy || !form.approverUserId} type="submit">
-        {busy ? "Submitting…" : "Send for approval"}
+        {busy ? "Submitting…" : "Submit form"}
       </Button>
     </form>
   );
@@ -847,8 +1044,8 @@ function WaitingStep() {
       </div>
       <h1>Waiting for approval</h1>
       <p className="sg-muted">
-        Your request for {flow.room?.roomNumber} is with the site manager. Stay near the door — you
-        will get an SMS when it is reviewed.
+        Your request for {locationDisplay(flow.room) || flow.siteName || "this location"} is with the
+        manager. Stay on site — you will get an SMS when it is reviewed.
       </p>
       <p className="sg-help">
         Demo: open the{" "}
@@ -867,6 +1064,22 @@ function VisitStep() {
   const [error, setError] = useState("");
   const clockedIn = Boolean(flow.request?.clockedInAt);
   const expected = flow.request?.expectedClockOutAt;
+
+  useEffect(() => {
+    if (flow.room?.id || !flow.request?.roomId || !flow.siteId) return;
+    let cancelled = false;
+    void locationForRequest(flow.request.roomId, {
+      siteId: flow.siteId,
+      siteName: flow.siteName,
+      siteAddress: flow.siteAddress,
+    }).then((room) => {
+      if (!cancelled && room) flow.set({ room });
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flow.request?.roomId, flow.siteId, flow.room?.id]);
 
   async function clockIn() {
     if (!flow.request) {
@@ -898,7 +1111,7 @@ function VisitStep() {
             accessRequestId: flow.request.id,
             workerId,
             eventType: "ClockedIn",
-            description: `${flow.worker?.firstName ?? "Worker"} ${flow.worker?.lastName ?? ""} clocked in to ${flow.room?.roomNumber ?? "room"}.`,
+            description: `${flow.worker?.firstName ?? "Worker"} ${flow.worker?.lastName ?? ""} clocked in at ${locationDisplay(flow.room)}.`,
           });
         }
       } catch {
@@ -923,15 +1136,14 @@ function VisitStep() {
     <div className="sg-form-grid">
       <h1>{clockedIn ? "You are on site" : "Approved visit"}</h1>
       <p className="sg-muted">
-        {flow.room?.roomNumber} {flow.room?.name}. Clock in when you enter, then sign out when you
-        leave.
+        {locationDisplay(flow.room) || flow.request?.locationLabel || flow.siteName}. Clock in when you enter, then sign out when you leave.
       </p>
       {flow.room ? (
         <div className="sg-room-chip">
           <strong>
-            {flow.room.roomNumber} {flow.room.name}
+            {locationDisplay(flow.room)}
           </strong>
-          <small>{flow.room.description}</small>
+          <small>{flow.room?.workAreaName ? `${flow.room.workAreaName} · ${flow.siteName}` : flow.room?.description}</small>
         </div>
       ) : null}
       {clockedIn ? (
@@ -1016,7 +1228,7 @@ function ClockOutStep() {
             accessRequestId: flow.request.id,
             workerId,
             eventType: "ClockedOut",
-            description: `${flow.worker?.firstName ?? "Worker"} ${flow.worker?.lastName ?? ""} clocked out of ${flow.room?.roomNumber ?? "room"}.`,
+            description: `${flow.worker?.firstName ?? "Worker"} ${flow.worker?.lastName ?? ""} clocked out of ${locationDisplay(flow.room)}.`,
           });
         }
       } catch {
@@ -1037,7 +1249,7 @@ function ClockOutStep() {
     <div className="sg-form-grid">
       <h1>Sign out</h1>
       <p className="sg-muted">
-        Access is approved for {flow.room?.roomNumber}. Add a photo if you can, then sign out to
+        Access is approved for {locationDisplay(flow.room)}. Add a photo if you can, then sign out to
         close the visit.
       </p>
       {flow.request?.clockedInAt ? (
@@ -1091,7 +1303,7 @@ function DoneStep() {
       </div>
       <h1>Visit closed</h1>
       <p className="sg-muted">
-        {prettyPhone(flow.phoneNumber)} · {flow.room?.roomNumber} {flow.room?.name}. Photos and times
+        {prettyPhone(flow.phoneNumber)} · {locationDisplay(flow.room)}. Photos and times
         are stored for audit.
       </p>
       <div className="sg-cta-row">

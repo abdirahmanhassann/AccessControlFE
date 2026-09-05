@@ -14,7 +14,7 @@ function Home() {
             Manager console
           </Link>
           <Link to="/worker" className="sg-btn sg-btn-primary">
-            Scan a room QR
+            Scan a site QR
           </Link>
         </div>
       </header>
@@ -24,8 +24,8 @@ function Home() {
           <div className="sg-kicker">Construction site access</div>
           <h1>Room access, without the clipboard.</h1>
           <p className="sg-lede">
-            Workers scan a door QR, verify by SMS, and wait for a manager. Every
-            visit is photographed, timed, and stored for audit.
+            Workers scan a site QR, verify by SMS, pick tower and apartment or riser, then wait for
+            the manager for that location. Every visit is photographed, timed, and stored for audit.
           </p>
           <div className="sg-cta-row">
             <Link to="/worker" className="sg-btn sg-btn-primary">
@@ -40,11 +40,11 @@ function Home() {
           <h2>How a visit works</h2>
           <div className="sg-step-list">
             {[
-              ["Scan", "Room QR on the door."],
+              ["Scan", "Site QR at the gate."],
               ["Verify", "Phone number + one-time SMS code."],
-              ["Request", "Reason, trade, and company."],
-              ["Approve", "Site manager reviews in the console."],
-              ["Leave", "Photo of the room, then clock out."],
+              ["Request", "Tower, apartment or riser, job, and supervisor."],
+              ["Approve", "Only the manager for that location reviews it."],
+              ["Leave", "Photo of the area, then clock out."],
             ].map(([title, body], i) => (
               <div className="sg-step-item" key={title}>
                 <div className="sg-step-num">{i + 1}</div>
@@ -66,8 +66,8 @@ function Home() {
             </div>
             <h3>No app login for trades</h3>
             <p>
-              A worker only needs a phone. Scan, SMS, form. If they already have
-              an approved visit, the same QR clocks them out.
+              A worker only needs a phone. Scan the gate, SMS, form. If they already have
+              an approved visit on this site, the same QR clocks them in or out.
             </p>
           </div>
           <div>
@@ -76,7 +76,7 @@ function Home() {
             </div>
             <h3>Named approvals</h3>
             <p>
-              Managers see who, which room, why, and can approve or reject with
+              Managers see who, which apartment or riser, why, and can approve or reject with
               a comment. The worker is notified by SMS.
             </p>
           </div>

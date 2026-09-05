@@ -67,7 +67,7 @@ function RequestsPage() {
     <div className="sg-content">
       {error || listError ? <p className="sg-error">{error || listError}</p> : null}
       <div className="sg-toolbar">
-        <Input placeholder="Search worker, room, trade" value={q} onChange={(e) => setQ(e.target.value)} />
+        <Input placeholder="Search worker, location, trade" value={q} onChange={(e) => setQ(e.target.value)} />
         <Select
           value={status}
           onChange={(e) => {

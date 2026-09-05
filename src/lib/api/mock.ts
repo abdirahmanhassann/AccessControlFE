@@ -5,9 +5,13 @@ import {
   type AccessRequestApproval,
   type AccessWindow,
   type AuditEvent,
+  type Department,
+  type DepartmentManagerMapping,
+  type DepartmentRoomMapping,
   type Notification,
   type OTPVerification,
   type Room,
+  type RoomManager,
   type ScanQrResult,
   type Session,
   type Site,
@@ -16,8 +20,9 @@ import {
   type WorkAreaManager,
   type Worker,
 } from "./types";
+import { locationDisplay } from "@/lib/location";
 
-const KEY = "sitegate.db.v2";
+const KEY = "sitegate.db.v5";
 
 type Db = {
   users: User[];
@@ -27,6 +32,10 @@ type Db = {
   rooms: Room[];
   workers: Worker[];
   workAreaManagers: WorkAreaManager[];
+  roomManagers: RoomManager[];
+  departments: Department[];
+  departmentRoomMappings: DepartmentRoomMapping[];
+  departmentManagerMappings: DepartmentManagerMapping[];
   windows: AccessWindow[];
   requests: AccessRequest[];
   approvals: AccessRequestApproval[];
@@ -78,15 +87,36 @@ function seed(): Db {
       isActive: true,
       createdAt: hoursAgo(180),
     },
+    {
+      id: 4,
+      firstName: "Dan",
+      lastName: "Okonkwo",
+      email: "dan.okonkwo@sitegate.demo",
+      phoneNumber: "07700900004",
+      role: "Manager",
+      isActive: true,
+      createdAt: hoursAgo(160),
+    },
+    {
+      id: 5,
+      firstName: "Sara",
+      lastName: "Malik",
+      email: "sara.malik@sitegate.demo",
+      phoneNumber: "07700900005",
+      role: "Manager",
+      isActive: true,
+      createdAt: hoursAgo(140),
+    },
   ];
 
   const sites: Site[] = [
     {
       id: 1,
-      name: "Riverside Tower",
+      name: "Riverside",
       address: "42 Harbour Lane, London E14 9GE",
       reference: "REF-RIV-01",
       isActive: true,
+      qrCodeIdentifier: "SG-RIV-GATE",
     },
     {
       id: 2,
@@ -94,6 +124,7 @@ function seed(): Db {
       address: "18 Station Road, Manchester M1 2WE",
       reference: "REF-OAK-02",
       isActive: true,
+      qrCodeIdentifier: "SG-OAK-GATE",
     },
   ];
 
@@ -101,79 +132,39 @@ function seed(): Db {
     {
       id: 1,
       siteId: 1,
-      name: "Block A — Superstructure",
-      description: "Levels 1–18 frame, cores and plant rooms.",
+      name: "Tower 1",
+      description: "Apartments and mechanical risers, Tower 1.",
       isActive: true,
     },
     {
       id: 2,
       siteId: 1,
-      name: "Block A — MEP risers",
-      description: "Electrical, HVAC and wet risers.",
+      name: "Tower 2",
+      description: "Apartments and risers, Tower 2.",
       isActive: true,
     },
     {
       id: 3,
-      siteId: 1,
-      name: "Ground floor fit-out",
-      description: "Lobby, comms and back-of-house.",
-      isActive: true,
-    },
-    {
-      id: 4,
       siteId: 2,
-      name: "North wing",
-      description: "Plant and service corridors.",
+      name: "Tower A",
+      description: "Oakridge north tower.",
       isActive: true,
     },
   ];
 
   const rooms: Room[] = [
-    {
-      id: 1,
-      workAreaId: 1,
-      roomNumber: "A-101",
-      name: "Plant room",
-      qrCodeIdentifier: "SG-RIV-A101",
-      description: "Primary plant. Isolation required before entry.",
-      isActive: true,
-    },
-    {
-      id: 2,
-      workAreaId: 2,
-      roomNumber: "A-204",
-      name: "Electrical riser",
-      qrCodeIdentifier: "SG-RIV-A204",
-      description: "Live boards. Authorised persons only.",
-      isActive: true,
-    },
-    {
-      id: 3,
-      workAreaId: 3,
-      roomNumber: "GF-12",
-      name: "Comms room",
-      qrCodeIdentifier: "SG-RIV-GF12",
-      description: "Data cabinets and fire alarm panel.",
-      isActive: true,
-    },
-    {
-      id: 4,
-      workAreaId: 1,
-      roomNumber: "A-310",
-      name: "Roof access",
-      qrCodeIdentifier: "SG-RIV-A310",
-      description: "Edge protection must be in place.",
-      isActive: true,
-    },
-    {
-      id: 5,
-      workAreaId: 4,
-      roomNumber: "NW-04",
-      name: "Plant corridor",
-      qrCodeIdentifier: "SG-OAK-NW04",
-      description: "Service spine, north wing.",
-      isActive: true,
-    },
+    { id: 1, workAreaId: 1, roomNumber: "13.2", name: "Apartment 13.2", qrCodeIdentifier: "SG-RIV-T1-132", description: "Tower 1 apartment.", isActive: true, locationKind: "Apartment" },
+    { id: 2, workAreaId: 1, roomNumber: "13.3", name: "Apartment 13.3", qrCodeIdentifier: "SG-RIV-T1-133", description: "Tower 1 apartment.", isActive: true, locationKind: "Apartment" },
+    { id: 3, workAreaId: 1, roomNumber: "13.4", name: "Apartment 13.4", qrCodeIdentifier: "SG-RIV-T1-134", description: "Tower 1 apartment.", isActive: true, locationKind: "Apartment" },
+    { id: 4, workAreaId: 1, roomNumber: "13.5", name: "Apartment 13.5", qrCodeIdentifier: "SG-RIV-T1-135", description: "Tower 1 apartment.", isActive: true, locationKind: "Apartment" },
+    { id: 5, workAreaId: 1, roomNumber: "E2.00.21", name: "MECHANICAL Riser E2.00.21", qrCodeIdentifier: "SG-RIV-T1-E221", description: "Mechanical riser, Tower 1.", isActive: true, locationKind: "Riser" },
+    { id: 6, workAreaId: 1, roomNumber: "E2.00.22", name: "MECHANICAL Riser E2.00.22", qrCodeIdentifier: "SG-RIV-T1-E222", description: "Mechanical riser, Tower 1.", isActive: true, locationKind: "Riser" },
+    { id: 7, workAreaId: 1, roomNumber: "E2.00.23", name: "MECHANICAL Riser E2.00.23", qrCodeIdentifier: "SG-RIV-T1-E223", description: "Mechanical riser, Tower 1.", isActive: true, locationKind: "Riser" },
+    { id: 8, workAreaId: 2, roomNumber: "14.1", name: "Apartment 14.1", qrCodeIdentifier: "SG-RIV-T2-141", description: "Tower 2 apartment.", isActive: true, locationKind: "Apartment" },
+    { id: 9, workAreaId: 2, roomNumber: "14.2", name: "Apartment 14.2", qrCodeIdentifier: "SG-RIV-T2-142", description: "Tower 2 apartment.", isActive: true, locationKind: "Apartment" },
+    { id: 10, workAreaId: 2, roomNumber: "E3.00.10", name: "MECHANICAL Riser E3.00.10", qrCodeIdentifier: "SG-RIV-T2-E310", description: "Mechanical riser, Tower 2.", isActive: true, locationKind: "Riser" },
+    { id: 11, workAreaId: 3, roomNumber: "2.1", name: "Apartment 2.1", qrCodeIdentifier: "SG-OAK-TA-21", description: "Oakridge Tower A apartment.", isActive: true, locationKind: "Apartment" },
+    { id: 12, workAreaId: 3, roomNumber: "R1.00.01", name: "MECHANICAL Riser R1.00.01", qrCodeIdentifier: "SG-OAK-TA-R101", description: "Oakridge Tower A riser.", isActive: true, locationKind: "Riser" },
   ];
 
   const workers: Worker[] = [
@@ -208,11 +199,46 @@ function seed(): Db {
 
   const workAreaManagers: WorkAreaManager[] = [
     { id: 1, workAreaId: 1, managerUserId: 2, isPrimary: true },
-    { id: 2, workAreaId: 2, managerUserId: 3, isPrimary: true },
-    { id: 3, workAreaId: 3, managerUserId: 3, isPrimary: true },
-    { id: 4, workAreaId: 4, managerUserId: 2, isPrimary: true },
-    { id: 5, workAreaId: 1, managerUserId: 3, isPrimary: false },
+    { id: 2, workAreaId: 1, managerUserId: 3, isPrimary: false },
+    { id: 3, workAreaId: 2, managerUserId: 5, isPrimary: true },
+    { id: 4, workAreaId: 3, managerUserId: 2, isPrimary: true },
   ];
+
+  const roomManagers: RoomManager[] = [
+    { id: 1, roomId: 1, managerUserId: 2, isPrimary: true },
+    { id: 2, roomId: 2, managerUserId: 2, isPrimary: true },
+    { id: 3, roomId: 3, managerUserId: 4, isPrimary: true },
+    { id: 4, roomId: 4, managerUserId: 4, isPrimary: true },
+    { id: 5, roomId: 5, managerUserId: 3, isPrimary: true },
+    { id: 6, roomId: 6, managerUserId: 3, isPrimary: true },
+    { id: 7, roomId: 7, managerUserId: 3, isPrimary: true },
+    { id: 8, roomId: 8, managerUserId: 5, isPrimary: true },
+    { id: 9, roomId: 9, managerUserId: 5, isPrimary: true },
+    { id: 10, roomId: 10, managerUserId: 5, isPrimary: true },
+    { id: 11, roomId: 11, managerUserId: 2, isPrimary: true },
+    { id: 12, roomId: 12, managerUserId: 2, isPrimary: true },
+  ];
+
+  const departments: Department[] = [
+    { id: 1, siteId: 1, name: "Electrical", description: "Power, lighting, and containment.", isActive: true, siteName: "Riverside" },
+    { id: 2, siteId: 1, name: "Mechanical", description: "HVAC, pipework, and risers.", isActive: true, siteName: "Riverside" },
+    { id: 3, siteId: 1, name: "Fire & life safety", description: "Detection, suppression, and fire stopping.", isActive: true, siteName: "Riverside" },
+    { id: 4, siteId: 1, name: "General / finishing", description: "Fit-out, decoration, and general trades.", isActive: true, siteName: "Riverside" },
+    { id: 5, siteId: 2, name: "Electrical", description: "Power and lighting.", isActive: true, siteName: "Oakridge Mixed-Use" },
+    { id: 6, siteId: 2, name: "Mechanical", description: "HVAC and risers.", isActive: true, siteName: "Oakridge Mixed-Use" },
+  ];
+
+  const departmentManagerMappings: DepartmentManagerMapping[] = [
+    { id: 1, departmentId: 1, userId: 2, isPrimary: true, departmentName: "Electrical" },
+    { id: 2, departmentId: 1, userId: 4, isPrimary: false, departmentName: "Electrical" },
+    { id: 3, departmentId: 2, userId: 3, isPrimary: true, departmentName: "Mechanical" },
+    { id: 4, departmentId: 3, userId: 5, isPrimary: true, departmentName: "Fire & life safety" },
+    { id: 5, departmentId: 4, userId: 2, isPrimary: true, departmentName: "General / finishing" },
+    { id: 6, departmentId: 5, userId: 2, isPrimary: true, departmentName: "Electrical" },
+    { id: 7, departmentId: 6, userId: 3, isPrimary: true, departmentName: "Mechanical" },
+  ];
+
+  const departmentRoomMappings: DepartmentRoomMapping[] = [];
 
   const windows: AccessWindow[] = [];
   let wid = 1;
@@ -241,16 +267,21 @@ function seed(): Db {
     {
       id: 1,
       workerId: 1,
-      roomId: 3,
+      roomId: 1,
       status: "Approved",
       reason: "Second fix",
-      workType: "Data / Comms",
-      description: "Terminate fibre into cabinet C3. Need 4 hours.",
+      workType: "Electrical",
+      description: "Second fix in apartment 13.2. Need 4 hours.",
       phoneNumber: "07700900123",
+      supervisorName: "Neil Brennan",
+      workFrom: hoursAgo(2),
+      workTo: hoursAgo(-6),
+      towerName: "Tower 1",
+      locationLabel: "Apartment 13.2",
       approvedAt: hoursAgo(3.2),
       rejectedAt: null,
-      clockedInAt: hoursAgo(3),
-      expectedClockOutAt: hoursAgo(-5),
+      clockedInAt: null,
+      expectedClockOutAt: hoursAgo(-6),
       clockedOutAt: null,
       completedAt: null,
       createdAt: hoursAgo(3.5),
@@ -258,16 +289,21 @@ function seed(): Db {
     {
       id: 2,
       workerId: 2,
-      roomId: 1,
+      roomId: 2,
       status: "Pending",
       reason: "First fix",
       workType: "Scaffolding",
-      description: "Strike internal scaffold in plant room after steel inspection.",
+      description: "Strike internal scaffold in apartment 13.3 after steel inspection.",
       phoneNumber: "07700900456",
+      supervisorName: "Helen Park",
+      workFrom: hoursAgo(-1),
+      workTo: hoursAgo(-9),
+      towerName: "Tower 1",
+      locationLabel: "Apartment 13.3",
       approvedAt: null,
       rejectedAt: null,
       clockedInAt: null,
-      expectedClockOutAt: null,
+      expectedClockOutAt: hoursAgo(-9),
       clockedOutAt: null,
       completedAt: null,
       createdAt: hoursAgo(0.6),
@@ -275,16 +311,21 @@ function seed(): Db {
     {
       id: 3,
       workerId: 3,
-      roomId: 2,
+      roomId: 5,
       status: "Pending",
       reason: "Commissioning",
       workType: "HVAC",
-      description: "Balance VAV boxes on riser A-204. Isolate AHU-2 first.",
+      description: "Balance VAV boxes on MECHANICAL Riser E2.00.21. Isolate AHU-2 first.",
       phoneNumber: "07700900789",
+      supervisorName: "Anita Cole",
+      workFrom: hoursAgo(-0.5),
+      workTo: hoursAgo(-8),
+      towerName: "Tower 1",
+      locationLabel: "MECHANICAL Riser E2.00.21",
       approvedAt: null,
       rejectedAt: null,
       clockedInAt: null,
-      expectedClockOutAt: null,
+      expectedClockOutAt: hoursAgo(-8),
       clockedOutAt: null,
       completedAt: null,
       createdAt: hoursAgo(0.25),
@@ -292,16 +333,21 @@ function seed(): Db {
     {
       id: 4,
       workerId: 1,
-      roomId: 2,
+      roomId: 5,
       status: "Rejected",
       reason: "Isolation",
       workType: "Electrical",
-      description: "Need board isolation for DB-3. Permit not attached.",
+      description: "Need board isolation on riser E2.00.21. Permit not attached.",
       phoneNumber: "07700900123",
+      supervisorName: "Neil Brennan",
+      workFrom: hoursAgo(28),
+      workTo: hoursAgo(20),
+      towerName: "Tower 1",
+      locationLabel: "MECHANICAL Riser E2.00.21",
       approvedAt: null,
       rejectedAt: hoursAgo(26),
       clockedInAt: null,
-      expectedClockOutAt: null,
+      expectedClockOutAt: hoursAgo(20),
       clockedOutAt: null,
       completedAt: null,
       createdAt: hoursAgo(28),
@@ -309,12 +355,17 @@ function seed(): Db {
     {
       id: 5,
       workerId: 3,
-      roomId: 5,
+      roomId: 11,
       status: "Completed",
       reason: "Inspection",
       workType: "HVAC",
-      description: "Filter change and visual on condensers.",
+      description: "Filter change in apartment 2.1.",
       phoneNumber: "07700900789",
+      supervisorName: "Anita Cole",
+      workFrom: hoursAgo(50),
+      workTo: hoursAgo(42),
+      towerName: "Tower A",
+      locationLabel: "Apartment 2.1",
       approvedAt: hoursAgo(50),
       rejectedAt: null,
       clockedInAt: hoursAgo(49),
@@ -329,9 +380,9 @@ function seed(): Db {
     {
       id: 1,
       accessRequestId: 1,
-      approverUserId: 3,
+      approverUserId: 2,
       status: "Approved",
-      comment: "Comms room free until 16:00. Sign the visitor board.",
+      comment: "Apartment 13.2 free until 17:00. Sign the visitor board.",
       createdAt: hoursAgo(3.2),
     },
     {
@@ -349,6 +400,24 @@ function seed(): Db {
       status: "Approved",
       comment: "North wing clear.",
       createdAt: hoursAgo(50),
+    },
+    {
+      id: 4,
+      accessRequestId: 2,
+      approverUserId: 2,
+      status: "Pending",
+      comment: "",
+      createdAt: hoursAgo(0.6),
+      reviewedAt: null,
+    },
+    {
+      id: 5,
+      accessRequestId: 3,
+      approverUserId: 3,
+      status: "Pending",
+      comment: "",
+      createdAt: hoursAgo(0.25),
+      reviewedAt: null,
     },
   ];
 
@@ -374,7 +443,7 @@ function seed(): Db {
       accessRequestId: 2,
       type: "NewRequest",
       channel: "InApp",
-      message: "Lucy Chen requested access to A-101 Plant room.",
+      message: "Lucy Chen requested access to Apartment 13.3.",
       status: "Sent",
       sentAt: hoursAgo(0.6),
       readAt: null,
@@ -387,7 +456,7 @@ function seed(): Db {
       accessRequestId: 3,
       type: "NewRequest",
       channel: "InApp",
-      message: "Marcus Reid requested access to A-204 Electrical riser.",
+      message: "Marcus Reid requested access to MECHANICAL Riser E2.00.21.",
       status: "Sent",
       sentAt: hoursAgo(0.25),
       readAt: null,
@@ -400,7 +469,7 @@ function seed(): Db {
       accessRequestId: 1,
       type: "Approved",
       channel: "SMS",
-      message: "Access approved for GF-12 Comms room. Scan the room QR when you leave.",
+      message: "Access approved for Apartment 13.2. Scan the site QR to clock in.",
       status: "Sent",
       sentAt: hoursAgo(3.2),
       readAt: hoursAgo(3.1),
@@ -415,7 +484,7 @@ function seed(): Db {
       workerId: 2,
       userId: null,
       eventType: "AccessRequested",
-      description: "Lucy Chen submitted access for A-101 Plant room.",
+      description: "Lucy Chen submitted access for Apartment 13.3.",
       ipAddress: "10.4.12.8",
       metadata: JSON.stringify({ room: "A-101", workType: "Scaffolding" }),
       createdAt: hoursAgo(0.6),
@@ -426,7 +495,7 @@ function seed(): Db {
       workerId: 3,
       userId: null,
       eventType: "AccessRequested",
-      description: "Marcus Reid submitted access for A-204 Electrical riser.",
+      description: "Marcus Reid submitted access for MECHANICAL Riser E2.00.21.",
       ipAddress: "10.4.12.21",
       metadata: JSON.stringify({ room: "A-204", workType: "HVAC" }),
       createdAt: hoursAgo(0.25),
@@ -437,7 +506,7 @@ function seed(): Db {
       workerId: 1,
       userId: 3,
       eventType: "AccessApproved",
-      description: "Priya Shah approved Tom Brennan for GF-12.",
+      description: "James Cole approved Tom Brennan for Apartment 13.2.",
       ipAddress: "10.4.1.4",
       metadata: "{}",
       createdAt: hoursAgo(3.2),
@@ -448,7 +517,7 @@ function seed(): Db {
       workerId: 1,
       userId: 3,
       eventType: "AccessRejected",
-      description: "Priya Shah rejected electrical isolation on A-204.",
+      description: "Priya Shah rejected electrical isolation on E2.00.21.",
       ipAddress: "10.4.1.4",
       metadata: "{}",
       createdAt: hoursAgo(26),
@@ -459,7 +528,7 @@ function seed(): Db {
       workerId: 3,
       userId: null,
       eventType: "ClockedOut",
-      description: "Marcus Reid clocked out of NW-04.",
+      description: "Marcus Reid clocked out of Apartment 2.1.",
       ipAddress: "10.8.0.3",
       metadata: "{}",
       createdAt: hoursAgo(47),
@@ -472,12 +541,18 @@ function seed(): Db {
       "1": "SiteGate1!",
       "2": "SiteGate1!",
       "3": "SiteGate1!",
+      "4": "SiteGate1!",
+      "5": "SiteGate1!",
     },
     sites,
     workAreas,
     rooms,
     workers,
     workAreaManagers,
+    roomManagers,
+    departments,
+    departmentRoomMappings,
+    departmentManagerMappings,
     windows,
     requests,
     approvals,
@@ -487,15 +562,19 @@ function seed(): Db {
     audits,
     sessions: [],
     seq: {
-      users: 4,
+      users: 6,
       sites: 3,
-      workAreas: 5,
-      rooms: 6,
+      workAreas: 4,
+      rooms: 13,
       workers: 4,
-      workAreaManagers: 6,
+      workAreaManagers: 5,
+      roomManagers: 13,
+      departments: 7,
+      departmentRoomMappings: 1,
+      departmentManagerMappings: 8,
       windows: wid,
       requests: 6,
-      approvals: 4,
+      approvals: 6,
       photos: 2,
       otps: 1,
       notifications: 4,
@@ -513,6 +592,10 @@ function emptyDb(): Db {
     rooms: [],
     workers: [],
     workAreaManagers: [],
+    roomManagers: [],
+    departments: [],
+    departmentRoomMappings: [],
+    departmentManagerMappings: [],
     windows: [],
     requests: [],
     approvals: [],
@@ -601,21 +684,76 @@ function digits(phone: string) {
   return phone.replace(/\D/g, "");
 }
 
-function findRoomBundle(qr: string): ScanQrResult {
-  const db = load();
-  const room = db.rooms.find(
-    (r) => r.qrCodeIdentifier.toLowerCase() === qr.trim().toLowerCase() && r.isActive,
+function findSiteByQr(qr: string): Site | undefined {
+  const code = qr.trim().toLowerCase();
+  return load().sites.find(
+    (s) => s.isActive && (s.qrCodeIdentifier || "").toLowerCase() === code,
   );
-  if (!room) throw new ApiError(404, "QR code not recognised.");
+}
+
+function bundleRoom(room: Room): ScanQrResult {
+  const db = load();
   const area = db.workAreas.find((w) => w.id === room.workAreaId);
   const site = area ? db.sites.find((s) => s.id === area.siteId) : undefined;
   return {
     ...room,
-    workAreaName: area?.name ?? "Unknown area",
+    workAreaName: area?.name ?? "Unknown tower",
     siteName: site?.name ?? "Unknown site",
     siteId: site?.id ?? 0,
     siteAddress: site?.address ?? "",
+    scanKind: "room",
   };
+}
+
+function findRoomBundle(qr: string): ScanQrResult {
+  const db = load();
+  const code = qr.trim().toLowerCase();
+  const site = findSiteByQr(qr);
+  if (site) {
+    return {
+      id: 0,
+      workAreaId: 0,
+      roomNumber: "",
+      name: site.name,
+      qrCodeIdentifier: site.qrCodeIdentifier || qr,
+      description: site.address,
+      isActive: true,
+      locationKind: undefined,
+      workAreaName: "",
+      siteName: site.name,
+      siteId: site.id,
+      siteAddress: site.address,
+      scanKind: "site",
+    };
+  }
+  const room = db.rooms.find((r) => r.qrCodeIdentifier.toLowerCase() === code && r.isActive);
+  if (!room) throw new ApiError(404, "QR code not recognised.");
+  return bundleRoom(room);
+}
+
+function managersForRoom(roomId: number, departmentId = 0): User[] {
+  const db = load();
+  if (departmentId) {
+    const links = db.departmentManagerMappings.filter((m) => m.departmentId === departmentId);
+    if (links.length) {
+      const ids = new Set(links.map((l) => l.userId));
+      return db.users.filter((u) => ids.has(u.id) && u.isActive);
+    }
+  }
+  const links = db.roomManagers.filter((m) => m.roomId === roomId);
+  if (links.length) {
+    const ids = new Set(links.map((l) => l.managerUserId));
+    return db.users.filter((u) => ids.has(u.id) && u.isActive);
+  }
+  const room = db.rooms.find((r) => r.id === roomId);
+  if (!room) return [];
+  return managersForWorkArea(room.workAreaId);
+}
+
+function roomsOnSite(siteId: number): Room[] {
+  const db = load();
+  const areaIds = new Set(db.workAreas.filter((a) => a.siteId === siteId).map((a) => a.id));
+  return db.rooms.filter((r) => areaIds.has(r.workAreaId));
 }
 
 function notify(partial: Omit<Notification, "id" | "createdAt" | "sentAt" | "readAt" | "status"> & {
@@ -733,6 +871,7 @@ const handlers: Record<string, (body: Body) => unknown> = {
       address: String(body.address ?? ""),
       reference: String(body.reference ?? ""),
       isActive: true,
+      qrCodeIdentifier: String(body.qrCodeIdentifier ?? `SG-SITE-${token().slice(0, 6).toUpperCase()}`),
     };
     db.sites.push(site);
     persist();
@@ -746,14 +885,17 @@ const handlers: Record<string, (body: Body) => unknown> = {
     site.name = String(body.name ?? site.name);
     site.address = String(body.address ?? site.address);
     site.reference = String(body.reference ?? site.reference);
+    if (body.qrCodeIdentifier != null) site.qrCodeIdentifier = String(body.qrCodeIdentifier);
     site.isActive = Boolean(body.isActive);
     persist();
     return site;
   },
 
   "/Access/getworkareas": (body) => {
-    requireStaff(body as { token?: string });
-    return load().workAreas;
+    const siteId = Number(body.siteId ?? body.SiteId ?? 0);
+    if (!siteId) requireStaff(body as { token?: string });
+    const rows = load().workAreas.filter((a) => a.isActive !== false);
+    return siteId ? rows.filter((a) => a.siteId === siteId) : rows;
   },
   "/Access/insertworkarea": (body) => {
     requireStaff(body as { token?: string });
@@ -787,31 +929,128 @@ const handlers: Record<string, (body: Body) => unknown> = {
     return load().users.map(publicUser);
   },
   "/Access/getmanagersforroom": (body) => {
-    const room = load().rooms.find((r) => r.id === Number(body.roomId ?? body.RoomId));
-    if (!room) return [];
+    const roomId = Number(body.roomId ?? body.RoomId);
     const departmentId = Number(body.departmentId ?? body.DepartmentId ?? 0);
-    return managersForWorkArea(room.workAreaId)
-      .filter(() => !departmentId || departmentId === room.workAreaId)
-      .map((u) => ({
-        ...publicUser(u),
-        departmentName: load().workAreas.find((a) => a.id === room.workAreaId)?.name,
-        departmentId: room.workAreaId,
-      }));
+    const room = load().rooms.find((r) => r.id === roomId);
+    if (!room && !departmentId) return [];
+    const dept = departmentId
+      ? load().departments.find((d) => d.id === departmentId)
+      : undefined;
+    return managersForRoom(roomId, departmentId).map((u) => ({
+      ...publicUser(u),
+      departmentName: dept?.name,
+      departmentId: dept?.id,
+    }));
+  },
+  "/Access/getdepartments": (body) => {
+    const siteId = Number(body.siteId ?? body.SiteId ?? 0);
+    if (!siteId) requireStaff(body as { token?: string });
+    const rows = (load().departments ?? []).filter((d) => d.isActive !== false);
+    return siteId ? rows.filter((d) => d.siteId === siteId) : rows;
   },
   "/Access/getdepartmentsforroom": (body) => {
     const room = load().rooms.find((r) => r.id === Number(body.roomId ?? body.RoomId));
     if (!room) return [];
     const area = load().workAreas.find((a) => a.id === room.workAreaId);
     if (!area) return [];
-    return [
-      {
-        id: area.id,
-        siteId: area.siteId,
-        name: area.name,
-        description: area.description,
-        isActive: area.isActive,
-      },
-    ];
+    const mapped = (load().departmentRoomMappings ?? []).filter((m) => m.roomId === room.id);
+    const departments = (load().departments ?? []).filter((d) => d.isActive !== false);
+    if (mapped.length) {
+      const ids = new Set(mapped.map((m) => m.departmentId));
+      return departments.filter((d) => ids.has(d.id));
+    }
+    return departments.filter((d) => d.siteId === area.siteId);
+  },
+  "/Access/insertdepartment": (body) => {
+    requireStaff(body as { token?: string });
+    const db = load();
+    const site = db.sites.find((s) => s.id === Number(body.siteId));
+    const row: Department = {
+      id: nextId(db, "departments"),
+      siteId: Number(body.siteId),
+      name: String(body.name ?? "Department"),
+      description: String(body.description ?? ""),
+      isActive: true,
+      siteName: site?.name,
+    };
+    db.departments.push(row);
+    persist();
+    return row;
+  },
+  "/Access/updatedepartment": (body) => {
+    requireStaff(body as { token?: string });
+    const db = load();
+    const row = db.departments.find((d) => d.id === Number(body.id));
+    if (!row) throw new ApiError(404, "Department not found.");
+    row.siteId = Number(body.siteId ?? row.siteId);
+    row.name = String(body.name ?? row.name);
+    row.description = String(body.description ?? row.description);
+    row.isActive = Boolean(body.isActive);
+    persist();
+    return row;
+  },
+  "/Access/getdepartmentroommappings": (body) => {
+    requireStaff(body as { token?: string });
+    return load().departmentRoomMappings ?? [];
+  },
+  "/Access/insertdepartmentroommapping": (body) => {
+    requireStaff(body as { token?: string });
+    const db = load();
+    const departmentId = Number(body.departmentId);
+    const roomId = Number(body.roomId);
+    const dept = db.departments.find((d) => d.id === departmentId);
+    const room = db.rooms.find((r) => r.id === roomId);
+    const row: DepartmentRoomMapping = {
+      id: nextId(db, "departmentRoomMappings"),
+      departmentId,
+      roomId,
+      departmentName: dept?.name,
+      roomNumber: room?.roomNumber,
+      roomName: room?.name,
+    };
+    db.departmentRoomMappings.push(row);
+    persist();
+    return row;
+  },
+  "/Access/deletedepartmentroommapping": (body) => {
+    requireStaff(body as { token?: string });
+    const db = load();
+    db.departmentRoomMappings = db.departmentRoomMappings.filter((m) => m.id !== Number(body.id));
+    persist();
+    return true;
+  },
+  "/Access/getdepartmentmanagermappings": (body) => {
+    requireStaff(body as { token?: string });
+    return load().departmentManagerMappings ?? [];
+  },
+  "/Access/insertdepartmentmanagermapping": (body) => {
+    requireStaff(body as { token?: string });
+    const db = load();
+    const departmentId = Number(body.departmentId);
+    const userId = Number(body.userId);
+    const dept = db.departments.find((d) => d.id === departmentId);
+    const user = db.users.find((u) => u.id === userId);
+    const row: DepartmentManagerMapping = {
+      id: nextId(db, "departmentManagerMappings"),
+      departmentId,
+      userId,
+      isPrimary: Boolean(body.isPrimary),
+      departmentName: dept?.name,
+      firstName: user?.firstName,
+      lastName: user?.lastName,
+      email: user?.email,
+      role: user?.role,
+    };
+    db.departmentManagerMappings.push(row);
+    persist();
+    return row;
+  },
+  "/Access/deletedepartmentmanagermapping": (body) => {
+    requireStaff(body as { token?: string });
+    const db = load();
+    db.departmentManagerMappings = db.departmentManagerMappings.filter((m) => m.id !== Number(body.id));
+    persist();
+    return true;
   },
   "/Access/insertuser": (body) => {
     requireStaff(body as { token?: string });
@@ -930,8 +1169,16 @@ const handlers: Record<string, (body: Body) => unknown> = {
   },
 
   "/Access/getrooms": (body) => {
-    requireStaff(body as { token?: string });
-    return load().rooms;
+    const workAreaId = Number(body.workAreaId ?? body.WorkAreaId ?? 0);
+    const siteId = Number(body.siteId ?? body.SiteId ?? 0);
+    if (!workAreaId && !siteId) requireStaff(body as { token?: string });
+    let rows = load().rooms.filter((r) => r.isActive !== false);
+    if (workAreaId) rows = rows.filter((r) => r.workAreaId === workAreaId);
+    if (siteId) {
+      const areaIds = new Set(load().workAreas.filter((a) => a.siteId === siteId).map((a) => a.id));
+      rows = rows.filter((r) => areaIds.has(r.workAreaId));
+    }
+    return rows;
   },
   "/Access/insertroom": (body) => {
     requireStaff(body as { token?: string });
@@ -940,10 +1187,11 @@ const handlers: Record<string, (body: Body) => unknown> = {
       id: nextId(db, "rooms"),
       workAreaId: Number(body.workAreaId),
       roomNumber: String(body.roomNumber ?? ""),
-      name: String(body.name ?? "Room"),
+      name: String(body.name ?? "Location"),
       qrCodeIdentifier: `SG-${token().slice(0, 8).toUpperCase()}`,
       description: String(body.description ?? ""),
       isActive: true,
+      locationKind: String(body.locationKind ?? "Apartment"),
     };
     db.rooms.push(room);
     persist();
@@ -959,9 +1207,39 @@ const handlers: Record<string, (body: Body) => unknown> = {
     room.name = String(body.name ?? room.name);
     room.qrCodeIdentifier = String(body.qrCodeIdentifier ?? room.qrCodeIdentifier);
     room.description = String(body.description ?? room.description);
+    if (body.locationKind != null) room.locationKind = String(body.locationKind);
     room.isActive = Boolean(body.isActive);
     persist();
     return room;
+  },
+
+  "/Access/getroommanagers": (body) => {
+    requireStaff(body as { token?: string });
+    return load().roomManagers;
+  },
+  "/Access/insertroommanager": (body) => {
+    requireStaff(body as { token?: string });
+    const db = load();
+    const row: RoomManager = {
+      id: nextId(db, "roomManagers"),
+      roomId: Number(body.roomId),
+      managerUserId: Number(body.managerUserId),
+      isPrimary: body.isPrimary !== false,
+    };
+    db.roomManagers.push(row);
+    persist();
+    return row;
+  },
+  "/Access/updateroommanager": (body) => {
+    requireStaff(body as { token?: string });
+    const db = load();
+    const row = db.roomManagers.find((m) => m.id === Number(body.id));
+    if (!row) throw new ApiError(404, "Assignment not found.");
+    row.roomId = Number(body.roomId ?? row.roomId);
+    row.managerUserId = Number(body.managerUserId ?? row.managerUserId);
+    row.isPrimary = Boolean(body.isPrimary);
+    persist();
+    return row;
   },
 
   "/Access/getaccesswindows": (body) => {
@@ -998,10 +1276,18 @@ const handlers: Record<string, (body: Body) => unknown> = {
   },
 
   "/Access/getaccessrequests": (body) => {
-    const session = requireSession(body as { token?: string });
     const db = load();
+    const tok = String(body.token ?? "").trim();
+    const session = tok ? db.sessions.find((s) => s.token === tok) : undefined;
+    const id = Number(body.id ?? body.Id ?? 0);
+    const workerId = Number(body.workerId ?? body.WorkerId ?? 0);
+    const roomId = Number(body.roomId ?? body.RoomId ?? 0);
+    const siteId = Number(body.siteId ?? body.SiteId ?? 0);
+    if (!session && !id && !workerId && !roomId && !siteId) {
+      throw new ApiError(401, "Token is required.");
+    }
     let rows = db.requests;
-    if (session.kind === "worker") {
+    if (session?.kind === "worker") {
       const phone = session.phoneNumber ? digits(session.phoneNumber) : "";
       rows = db.requests.filter(
         (r) =>
@@ -1009,9 +1295,6 @@ const handlers: Record<string, (body: Body) => unknown> = {
           (phone && digits(r.phoneNumber ?? "") === phone),
       );
     }
-    const id = Number(body.id ?? body.Id ?? 0);
-    const workerId = Number(body.workerId ?? body.WorkerId ?? 0);
-    const roomId = Number(body.roomId ?? body.RoomId ?? 0);
     const status = String(body.status ?? body.Status ?? "");
     const search = String(body.search ?? body.Search ?? "").toLowerCase();
     const skip = Number(body.skip ?? body.Skip ?? 0);
@@ -1019,6 +1302,10 @@ const handlers: Record<string, (body: Body) => unknown> = {
     if (id) rows = rows.filter((r) => r.id === id);
     if (workerId) rows = rows.filter((r) => r.workerId === workerId);
     if (roomId) rows = rows.filter((r) => r.roomId === roomId);
+    if (siteId) {
+      const allowed = new Set(roomsOnSite(siteId).map((r) => r.id));
+      rows = rows.filter((r) => allowed.has(r.roomId));
+    }
     if (status) rows = rows.filter((r) => r.status === status);
     if (search) {
       rows = rows.filter((r) =>
@@ -1046,6 +1333,9 @@ const handlers: Record<string, (body: Body) => unknown> = {
     );
     if (active) return active;
 
+    const workFrom = String(body.workFrom ?? body.WorkFrom ?? "") || null;
+    const workTo = String(body.workTo ?? body.WorkTo ?? "") || null;
+    const area = db.workAreas.find((w) => w.id === room.workAreaId);
     const req: AccessRequest = {
       id: nextId(db, "requests"),
       workerId: worker.id,
@@ -1055,19 +1345,24 @@ const handlers: Record<string, (body: Body) => unknown> = {
       workType: String(body.workType ?? ""),
       description: String(body.description ?? ""),
       phoneNumber: phone || worker.phoneNumber,
+      supervisorName: String(body.supervisorName ?? body.SupervisorName ?? ""),
+      workFrom,
+      workTo,
+      towerName: area?.name ?? "",
+      locationLabel: locationDisplay(room),
       approvedAt: null,
       rejectedAt: null,
       clockedInAt: null,
-      expectedClockOutAt: null,
+      expectedClockOutAt: workTo,
       clockedOutAt: null,
       completedAt: null,
       createdAt: iso(),
     };
     db.requests.unshift(req);
-    const area = db.workAreas.find((w) => w.id === room.workAreaId);
     const chosenId = Number(body.approverUserId);
     const assigned =
       (chosenId ? db.users.find((u) => u.id === chosenId) : undefined) ??
+      managersForRoom(room.id)[0] ??
       managersForWorkArea(room.workAreaId)[0];
     if (assigned) {
       db.approvals.unshift({
@@ -1085,7 +1380,7 @@ const handlers: Record<string, (body: Body) => unknown> = {
         accessRequestId: req.id,
         type: "NewRequest",
         channel: "InApp",
-        message: `${worker.firstName} ${worker.lastName} requested access to ${room.roomNumber} ${room.name}.`,
+        message: `${worker.firstName} ${worker.lastName} requested access to ${locationDisplay(room)}.`,
       });
     }
     audit({
@@ -1093,7 +1388,7 @@ const handlers: Record<string, (body: Body) => unknown> = {
       workerId: worker.id,
       userId: null,
       eventType: "AccessRequested",
-      description: `${worker.firstName} ${worker.lastName} submitted access for ${room.roomNumber}.`,
+      description: `${worker.firstName} ${worker.lastName} submitted access for ${locationDisplay(room)}.`,
       metadata: JSON.stringify({
         room: room.roomNumber,
         workType: req.workType,
@@ -1104,11 +1399,15 @@ const handlers: Record<string, (body: Body) => unknown> = {
     return req;
   },
   "/Access/updateaccessrequest": (body) => {
-    const session = requireSession(body as { token?: string });
     const db = load();
+    const tok = String(body.token ?? "").trim();
+    const session = tok ? db.sessions.find((s) => s.token === tok) : undefined;
     const req = db.requests.find((r) => r.id === Number(body.id));
     if (!req) throw new ApiError(404, "Request not found.");
-    if (session.kind === "worker" && req.workerId !== session.workerId) {
+    const workerClock =
+      req.id > 0 && (body.clockedInAt != null || body.clockedOutAt != null || body.completedAt != null);
+    if (!session && !workerClock) throw new ApiError(401, "Token is required.");
+    if (session?.kind === "worker" && req.workerId !== session.workerId) {
       throw new ApiError(403, "You can only update your own request.");
     }
     if (body.workerId != null) req.workerId = Number(body.workerId);
@@ -1199,22 +1498,21 @@ const handlers: Record<string, (body: Body) => unknown> = {
     if (status === "Approved") {
       req.status = "Approved";
       req.approvedAt = iso();
-      req.clockedInAt = iso();
-      req.expectedClockOutAt = expectedOutIso();
+      if (!req.expectedClockOutAt) req.expectedClockOutAt = req.workTo || expectedOutIso();
       notify({
         userId: null,
         workerId: req.workerId,
         accessRequestId: req.id,
         type: "Approved",
         channel: "SMS",
-        message: `Access approved for ${room?.roomNumber ?? "room"}. Scan the same QR when you leave.`,
+        message: `Access approved for ${locationDisplay(room)}. Scan the site QR to clock in.`,
       });
       audit({
         accessRequestId: req.id,
         workerId: req.workerId,
         userId: session.user.id,
         eventType: "AccessApproved",
-        description: `${session.user.firstName} ${session.user.lastName} approved ${worker?.firstName ?? "worker"} for ${room?.roomNumber ?? "room"}.`,
+        description: `${session.user.firstName} ${session.user.lastName} approved ${worker?.firstName ?? "worker"} for ${locationDisplay(room)}.`,
         metadata: JSON.stringify({ comment: row.comment }),
       });
     } else if (status === "Rejected") {
@@ -1226,14 +1524,14 @@ const handlers: Record<string, (body: Body) => unknown> = {
         accessRequestId: req.id,
         type: "Rejected",
         channel: "SMS",
-        message: `Access declined for ${room?.roomNumber ?? "room"}. ${row.comment || "Contact the site manager."}`,
+        message: `Access declined for ${locationDisplay(room)}. ${row.comment || "Contact the site manager."}`,
       });
       audit({
         accessRequestId: req.id,
         workerId: req.workerId,
         userId: session.user.id,
         eventType: "AccessRejected",
-        description: `${session.user.firstName} ${session.user.lastName} rejected ${worker?.firstName ?? "worker"} for ${room?.roomNumber ?? "room"}.`,
+        description: `${session.user.firstName} ${session.user.lastName} rejected ${worker?.firstName ?? "worker"} for ${locationDisplay(room)}.`,
         metadata: JSON.stringify({ comment: row.comment }),
       });
     }
@@ -1262,7 +1560,7 @@ const handlers: Record<string, (body: Body) => unknown> = {
       if (status === "Approved") {
         req.status = "Approved";
         req.approvedAt = row.reviewedAt ?? iso();
-        req.clockedInAt = req.clockedInAt ?? iso();
+        if (!req.expectedClockOutAt && req.workTo) req.expectedClockOutAt = req.workTo;
       } else if (status === "Rejected") {
         req.status = "Rejected";
         req.rejectedAt = row.reviewedAt ?? iso();

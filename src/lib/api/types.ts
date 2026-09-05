@@ -11,6 +11,8 @@ export type ApprovalStatus = "Approved" | "Rejected" | "Pending";
 
 export type NotificationStatus = "Queued" | "Sent" | "Read" | "Failed";
 
+export type LocationKind = "Apartment" | "Riser";
+
 export type User = {
   id: number;
   firstName: string;
@@ -30,6 +32,7 @@ export type Site = {
   address: string;
   reference: string;
   isActive: boolean;
+  qrCodeIdentifier?: string;
 };
 
 export type WorkArea = {
@@ -48,6 +51,7 @@ export type Room = {
   qrCodeIdentifier: string;
   description: string;
   isActive: boolean;
+  locationKind?: LocationKind | string;
 };
 
 export type Worker = {
@@ -63,6 +67,13 @@ export type Worker = {
 export type WorkAreaManager = {
   id: number;
   workAreaId: number;
+  managerUserId: number;
+  isPrimary: boolean;
+};
+
+export type RoomManager = {
+  id: number;
+  roomId: number;
   managerUserId: number;
   isPrimary: boolean;
 };
@@ -124,6 +135,11 @@ export type AccessRequest = {
   workType: string;
   description: string;
   phoneNumber?: string;
+  supervisorName?: string;
+  workFrom?: string | null;
+  workTo?: string | null;
+  towerName?: string;
+  locationLabel?: string;
   approvedAt: string | null;
   rejectedAt: string | null;
   clockedInAt: string | null;
@@ -205,6 +221,7 @@ export type ScanQrResult = Room & {
   siteName: string;
   siteId: number;
   siteAddress: string;
+  scanKind?: "site" | "room";
 };
 
 export type Session = {
@@ -253,6 +270,7 @@ export const DAY_NAMES = [
 
 export const WORK_TYPES = [
   "Electrical",
+  "Mechanical",
   "HVAC",
   "Scaffolding",
   "Structural",
