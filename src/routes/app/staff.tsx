@@ -83,15 +83,23 @@ function StaffPage() {
         <StaffForm
           initial={
             edit === "new"
-              ? { firstName: "", lastName: "", email: "", phoneNumber: "", role: "Manager", isActive: true }
+              ? { firstName: "", lastName: "", email: "", phoneNumber: "", role: "Manager", isActive: true, password: "" }
               : edit
           }
           onClose={() => setEdit(null)}
           onSave={async (values) => {
             const t = readSession()?.token;
             if (!t) return;
-            if (edit === "new") await api.insertUser(t, values);
-            else await api.updateUser(t, { ...(edit as User), ...values } as User);
+            if (edit === "new") {
+              if (!values.password || values.password.length < 8) {
+                toast("Set a password of at least 8 characters.");
+                return;
+              }
+              await api.insertUser(t, values);
+            } else {
+              await api.updateUser(t, { ...(edit as User), ...values } as User);
+              if (values.password) await api.setUserPassword(t, (edit as User).id, values.password);
+            }
             toast("Staff saved");
             setEdit(null);
             await reload();
@@ -122,9 +130,9 @@ function StaffForm({
   onClose,
   onSave,
 }: {
-  initial: Partial<User>;
+  initial: Partial<User> & { password?: string };
   onClose: () => void;
-  onSave: (v: Partial<User>) => Promise<void>;
+  onSave: (v: Partial<User> & { password?: string }) => Promise<void>;
 }) {
   const [v, setV] = useState(initial);
   const [busy, setBusy] = useState(false);
@@ -143,6 +151,15 @@ function StaffForm({
       </Field>
       <Field label="Phone">
         <Input value={v.phoneNumber ?? ""} onChange={(e) => setV({ ...v, phoneNumber: e.target.value })} />
+      </Field>
+      <Field label={initial.id ? "New password (optional)" : "Password"}>
+        <Input
+          type="password"
+          value={v.password ?? ""}
+          onChange={(e) => setV({ ...v, password: e.target.value })}
+          minLength={initial.id ? undefined : 8}
+          required={!initial.id}
+        />
       </Field>
       <Field label="Role">
         <Select value={String(v.role ?? "Manager")} onChange={(e) => setV({ ...v, role: e.target.value })}>

@@ -41,6 +41,7 @@ export type WorkArea = {
   name: string;
   description: string;
   isActive: boolean;
+  siteName?: string;
 };
 
 export type Room = {
@@ -247,6 +248,7 @@ export type CreateUserRequest = {
   password?: string | null;
   role?: string | null;
   isActive?: boolean;
+  token?: string | null;
 };
 
 export class ApiError extends Error {

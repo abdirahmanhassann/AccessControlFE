@@ -303,6 +303,18 @@ function asDepartment(data: unknown): Department {
   };
 }
 
+function asWorkArea(data: unknown): WorkArea {
+  const row = coerceRow(data);
+  return {
+    id: pickNum(row, ["id", "workAreaId"]),
+    siteId: pickNum(row, ["siteId"]),
+    name: pickStr(row, ["name", "workAreaName"]),
+    description: pickStr(row, ["description"]),
+    isActive: row.isActive !== false && row.IsActive !== false,
+    siteName: pickStr(row, ["siteName"]) || undefined,
+  };
+}
+
 function asSite(data: unknown): Site {
   const row = coerceRow(data);
   return {
@@ -535,11 +547,34 @@ function asRequest(
       createdAt: new Date().toISOString(),
     };
   }
-  if (isPlainObject(data) && data.id != null) return data as unknown as AccessRequest;
+  const row = coerceRow(data);
+  const id = pickNum(row, ["id"]);
+  const roomId = pickNum(row, ["roomId"]) || fallback.roomId;
+  if (id) {
+    const base = isPlainObject(data) ? (data as unknown as AccessRequest) : ({} as AccessRequest);
+    return {
+      ...base,
+      id,
+      workerId: num(base.workerId) || fallback.workerId,
+      roomId,
+      status: base.status || "Pending",
+      reason: base.reason || fallback.reason,
+      workType: base.workType || fallback.workType,
+      description: base.description || fallback.description,
+      phoneNumber: base.phoneNumber || fallback.phoneNumber,
+      approvedAt: base.approvedAt ?? null,
+      rejectedAt: base.rejectedAt ?? null,
+      clockedInAt: base.clockedInAt ?? null,
+      expectedClockOutAt: base.expectedClockOutAt ?? null,
+      clockedOutAt: base.clockedOutAt ?? null,
+      completedAt: base.completedAt ?? null,
+      createdAt: base.createdAt || new Date().toISOString(),
+    };
+  }
   return {
     id: 0,
     workerId: fallback.workerId,
-    roomId: fallback.roomId,
+    roomId,
     status: "Pending",
     reason: fallback.reason,
     workType: fallback.workType,
@@ -579,7 +614,21 @@ export const api = {
     }
     return { token, user: user ?? placeholderUser(req.email) };
   },
-  signup: (req: CreateUserRequest) => post<unknown>("/Access/signup", req),
+  signup: (req: CreateUserRequest) => post<unknown>("/Access/signup", { ...req, Token: req.token, token: req.token }),
+  requestPasswordReset: async (email: string) => {
+    const data = await post<unknown>("/Access/requestpasswordreset", { email, Email: email });
+    const row = coerceRow(data);
+    return { sent: true, code: pickStr(row, ["code"]) || undefined };
+  },
+  resetPassword: (data: { email: string; code: string; password: string }) =>
+    post<unknown>("/Access/resetpassword", {
+      email: data.email,
+      Email: data.email,
+      code: data.code,
+      Code: Number(data.code) || data.code,
+      password: data.password,
+      Password: data.password,
+    }),
   scanQr: async (qrCodeIdentifier: string) => {
     const raw = await post<unknown>("/Access/scanqr", { qrCodeIdentifier });
     const room = await resolveRoom(qrCodeIdentifier, raw);
@@ -610,11 +659,19 @@ export const api = {
   updateSite: (token: string, data: Site) => post<Site | null>("/Access/updatesite", { token, ...data }),
 
   getWorkAreas: (token: string, siteId?: number) =>
-    post<WorkArea[]>("/Access/getworkareas", { token, siteId, SiteId: siteId }).then(asArray<WorkArea>),
-  listTowers: async (siteId: number) =>
-    asArray<WorkArea>(
-      await post("/Access/getworkareas", { siteId, SiteId: siteId }),
-    ).filter((a) => a.id && a.isActive !== false && (!siteId || a.siteId === siteId || !a.siteId)),
+    post("/Access/getworkareas", { token, siteId, SiteId: siteId }).then((data) =>
+      asArray<unknown>(data).map(asWorkArea).filter((a) => a.id),
+    ),
+  listTowers: async (siteId?: number) =>
+    asArray<unknown>(
+      await post("/Access/getworkareas", {
+        siteId: siteId ?? 0,
+        SiteId: siteId ?? 0,
+        token: readWorkerSession()?.token || readSession()?.token || "",
+      }),
+    )
+      .map(asWorkArea)
+      .filter((a) => a.id && a.isActive !== false && (!siteId || a.siteId === siteId || !a.siteId)),
   listLocations: async (opts: { workAreaId?: number; siteId?: number }) =>
     asArray<unknown>(
       await post("/Access/getrooms", {
@@ -636,11 +693,11 @@ export const api = {
       .map((row) => asUserRow(row))
       .filter((row) => row.id),
   listManagers: async (roomId?: number, departmentId?: number) => {
-    if (roomId) {
+    if (roomId || departmentId) {
       return asArray<unknown>(
         await post("/Access/getmanagersforroom", {
-          roomId,
-          RoomId: roomId,
+          roomId: roomId ?? 0,
+          RoomId: roomId ?? 0,
           departmentId: departmentId ?? 0,
           DepartmentId: departmentId ?? 0,
         }),
@@ -655,9 +712,11 @@ export const api = {
     const managers = users.filter((u) => /^(admin|sitemanager|manager)$/i.test(String(u.role)));
     return managers.length ? managers : users;
   },
-  insertUser: (token: string, data: Partial<User>) =>
-    post<User | null>("/Access/insertuser", { token, ...data }),
+  insertUser: (token: string, data: Partial<User> & { password?: string }) =>
+    post<User | null>("/Access/insertuser", { token, Token: token, ...data, Password: data.password }),
   updateUser: (token: string, data: User) => post<User | null>("/Access/updateuser", { token, ...data }),
+  setUserPassword: (token: string, id: number, password: string) =>
+    post("/Access/setuserpassword", { token, Token: token, id, Id: id, password, Password: password }),
 
   getWorkAreaManagers: (token: string) =>
     post<WorkAreaManager[]>("/Access/getworkareamanagers", { token }).then(asArray<WorkAreaManager>),
@@ -768,7 +827,11 @@ export const api = {
   insertAccessRequest: async (data: {
     phoneNumber: string;
     workerId: number;
-    roomId: number;
+    roomId?: number;
+    workAreaId?: number;
+    roomText?: string;
+    departmentId?: number;
+    locationKind?: string;
     reason: string;
     workType: string;
     description: string;
@@ -780,8 +843,10 @@ export const api = {
   }) => {
     const roomId = num(data.roomId);
     const workerId = num(data.workerId);
-    if (!roomId) {
-      throw new ApiError(400, "Choose the apartment or riser before sending.");
+    const workAreaId = num(data.workAreaId);
+    const roomText = String(data.roomText ?? "").trim();
+    if (!roomId && (!workAreaId || !roomText)) {
+      throw new ApiError(400, "Enter the room.");
     }
     const payload: Record<string, unknown> = {
       phoneNumber: data.phoneNumber,
@@ -790,6 +855,16 @@ export const api = {
       WorkerId: workerId,
       roomId,
       RoomId: roomId,
+      workAreaId,
+      WorkAreaId: workAreaId,
+      roomText,
+      RoomText: roomText,
+      roomNumber: roomText,
+      RoomNumber: roomText,
+      departmentId: num(data.departmentId),
+      DepartmentId: num(data.departmentId),
+      locationKind: data.locationKind ?? "",
+      LocationKind: data.locationKind ?? "",
       reason: data.reason,
       Reason: data.reason,
       workType: data.workType,
@@ -812,9 +887,11 @@ export const api = {
       payload.approverUserId = approverUserId;
       payload.ApproverUserId = approverUserId;
     }
-    return asRequest(await post<unknown>("/Access/insertaccessrequest", payload), {
+    const created = await post<unknown>("/Access/insertaccessrequest", payload);
+    const resolvedRoomId = pickNum(coerceRow(created), ["roomId"]) || roomId;
+    return asRequest(created, {
       ...data,
-      roomId,
+      roomId: resolvedRoomId,
       workerId,
     });
   },
@@ -911,24 +988,29 @@ export const api = {
   verifyOtp: async (code: number) => {
     const data = await post<unknown>("/Access/verifyotp", { code });
     const row = coerceRow(data);
-    const workerId = pickNum(row, ["workerId", "id"]);
+    const nested =
+      isPlainObject(data) && (isPlainObject(data.worker) || isPlainObject(data.Worker))
+        ? coerceRow(data.worker ?? data.Worker)
+        : {};
+    const merged = { ...nested, ...row };
+    const workerId = pickNum(merged, ["workerId", "id"]);
     const hasWorkerFields = Boolean(
-      pickStr(row, ["firstName"]) ||
-        pickStr(row, ["lastName"]) ||
-        pickStr(row, ["companyName"]) ||
-        pickStr(row, ["workerPhoneNumber"]),
+      pickStr(merged, ["firstName"]) ||
+        pickStr(merged, ["lastName"]) ||
+        pickStr(merged, ["companyName"]) ||
+        pickStr(merged, ["workerPhoneNumber"]),
     );
     const worker =
-      workerId && (hasWorkerFields || pickStr(row, ["phoneNumber"]))
-        ? asWorkerRow(row)
+      workerId && (hasWorkerFields || pickStr(merged, ["phoneNumber"]))
+        ? asWorkerRow(merged)
         : workerId
-          ? asWorkerRow({ ...row, id: workerId, workerId })
+          ? asWorkerRow({ ...merged, id: workerId, workerId })
           : null;
     return {
       verified: true,
-      token: String(row.token ?? ""),
+      token: String(merged.token ?? row.token ?? ""),
       worker: worker?.id ? worker : null,
-      phoneNumber: String(row.phoneNumber ?? row.workerPhoneNumber ?? ""),
+      phoneNumber: String(merged.phoneNumber ?? merged.workerPhoneNumber ?? ""),
     };
   },
   updateOtp: (token: string, data: OTPVerification) =>

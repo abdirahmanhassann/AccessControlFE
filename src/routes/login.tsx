@@ -88,7 +88,7 @@ function LoginPage() {
             {busy ? "Signing in…" : "Enter console"}
           </Button>
           <p className="sg-muted">
-            New site? <Link to="/signup">Create an account</Link>
+            <Link to="/forgot">Forgot password</Link>
             {" · "}
             <Link to="/worker">Worker flow</Link>
           </p>

@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AppRouteImport } from './routes/app'
+import { Route as ForgotRouteImport } from './routes/forgot'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as WorkerRouteImport } from './routes/worker'
@@ -20,6 +21,7 @@ import { Route as AppAuditRouteImport } from './routes/app/audit'
 import { Route as AppDepartmentsRouteImport } from './routes/app/departments'
 import { Route as AppHoursRouteImport } from './routes/app/hours'
 import { Route as AppNotificationsRouteImport } from './routes/app/notifications'
+import { Route as AppOverdueRouteImport } from './routes/app/overdue'
 import { Route as AppRequestsRouteImport } from './routes/app/requests'
 import { Route as AppRoomsRouteImport } from './routes/app/rooms'
 import { Route as AppSitesRouteImport } from './routes/app/sites'
@@ -36,6 +38,11 @@ const IndexRoute = IndexRouteImport.update({
 const AppRoute = AppRouteImport.update({
   id: '/app',
   path: '/app',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ForgotRoute = ForgotRouteImport.update({
+  id: '/forgot',
+  path: '/forgot',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -83,6 +90,11 @@ const AppNotificationsRoute = AppNotificationsRouteImport.update({
   path: '/notifications',
   getParentRoute: () => AppRoute,
 } as any)
+const AppOverdueRoute = AppOverdueRouteImport.update({
+  id: '/overdue',
+  path: '/overdue',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppRequestsRoute = AppRequestsRouteImport.update({
   id: '/requests',
   path: '/requests',
@@ -122,6 +134,7 @@ const AppRequestsIdRoute = AppRequestsIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/forgot': typeof ForgotRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/worker': typeof WorkerRoute
@@ -130,6 +143,7 @@ export interface FileRoutesByFullPath {
   '/app/departments': typeof AppDepartmentsRoute
   '/app/hours': typeof AppHoursRoute
   '/app/notifications': typeof AppNotificationsRoute
+  '/app/overdue': typeof AppOverdueRoute
   '/app/requests': typeof AppRequestsRoute
   '/app/rooms': typeof AppRoomsRoute
   '/app/sites': typeof AppSitesRoute
@@ -141,6 +155,7 @@ export interface FileRoutesByFullPath {
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/forgot': typeof ForgotRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/worker': typeof WorkerRoute
@@ -149,6 +164,7 @@ export interface FileRoutesByTo {
   '/app/departments': typeof AppDepartmentsRoute
   '/app/hours': typeof AppHoursRoute
   '/app/notifications': typeof AppNotificationsRoute
+  '/app/overdue': typeof AppOverdueRoute
   '/app/requests': typeof AppRequestsRoute
   '/app/rooms': typeof AppRoomsRoute
   '/app/sites': typeof AppSitesRoute
@@ -162,6 +178,7 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/app': typeof AppRouteWithChildren
+  '/forgot': typeof ForgotRoute
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/worker': typeof WorkerRoute
@@ -170,6 +187,7 @@ export interface FileRoutesById {
   '/app/departments': typeof AppDepartmentsRoute
   '/app/hours': typeof AppHoursRoute
   '/app/notifications': typeof AppNotificationsRoute
+  '/app/overdue': typeof AppOverdueRoute
   '/app/requests': typeof AppRequestsRoute
   '/app/rooms': typeof AppRoomsRoute
   '/app/sites': typeof AppSitesRoute
@@ -184,6 +202,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/app'
+    | '/forgot'
     | '/login'
     | '/signup'
     | '/worker'
@@ -192,6 +211,7 @@ export interface FileRouteTypes {
     | '/app/departments'
     | '/app/hours'
     | '/app/notifications'
+    | '/app/overdue'
     | '/app/requests'
     | '/app/rooms'
     | '/app/sites'
@@ -203,6 +223,7 @@ export interface FileRouteTypes {
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
+    | '/forgot'
     | '/login'
     | '/signup'
     | '/worker'
@@ -211,6 +232,7 @@ export interface FileRouteTypes {
     | '/app/departments'
     | '/app/hours'
     | '/app/notifications'
+    | '/app/overdue'
     | '/app/requests'
     | '/app/rooms'
     | '/app/sites'
@@ -223,6 +245,7 @@ export interface FileRouteTypes {
     | '__root__'
     | '/'
     | '/app'
+    | '/forgot'
     | '/login'
     | '/signup'
     | '/worker'
@@ -231,6 +254,7 @@ export interface FileRouteTypes {
     | '/app/departments'
     | '/app/hours'
     | '/app/notifications'
+    | '/app/overdue'
     | '/app/requests'
     | '/app/rooms'
     | '/app/sites'
@@ -244,6 +268,7 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AppRoute: typeof AppRouteWithChildren
+  ForgotRoute: typeof ForgotRoute
   LoginRoute: typeof LoginRoute
   SignupRoute: typeof SignupRoute
   WorkerRoute: typeof WorkerRoute
@@ -264,6 +289,13 @@ declare module '@tanstack/react-router' {
       path: '/app'
       fullPath: '/app'
       preLoaderRoute: typeof AppRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/forgot': {
+      id: '/forgot'
+      path: '/forgot'
+      fullPath: '/forgot'
+      preLoaderRoute: typeof ForgotRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/login': {
@@ -329,6 +361,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppNotificationsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/overdue': {
+      id: '/app/overdue'
+      path: '/overdue'
+      fullPath: '/app/overdue'
+      preLoaderRoute: typeof AppOverdueRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/requests': {
       id: '/app/requests'
       path: '/requests'
@@ -387,6 +426,7 @@ interface AppRouteChildren {
   AppDepartmentsRoute: typeof AppDepartmentsRoute
   AppHoursRoute: typeof AppHoursRoute
   AppNotificationsRoute: typeof AppNotificationsRoute
+  AppOverdueRoute: typeof AppOverdueRoute
   AppRequestsRoute: typeof AppRequestsRoute
   AppRoomsRoute: typeof AppRoomsRoute
   AppSitesRoute: typeof AppSitesRoute
@@ -402,6 +442,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDepartmentsRoute: AppDepartmentsRoute,
   AppHoursRoute: AppHoursRoute,
   AppNotificationsRoute: AppNotificationsRoute,
+  AppOverdueRoute: AppOverdueRoute,
   AppRequestsRoute: AppRequestsRoute,
   AppRoomsRoute: AppRoomsRoute,
   AppSitesRoute: AppSitesRoute,
@@ -416,6 +457,7 @@ const AppRouteWithChildren = AppRoute._addFileChildren(AppRouteChildren)
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AppRoute: AppRouteWithChildren,
+  ForgotRoute: ForgotRoute,
   LoginRoute: LoginRoute,
   SignupRoute: SignupRoute,
   WorkerRoute: WorkerRoute,

@@ -6,6 +6,7 @@ import { readSession } from "@/lib/session";
 import {
   approvalApproverName,
   effectiveStatus,
+  overdueClockOuts,
   pendingRequests,
   roomLabel,
   useStaffData,
@@ -27,6 +28,7 @@ function Overview() {
   if (!mounted || loading || !data) return <PageSkeleton />;
 
   const pending = pendingRequests(data);
+  const overdue = overdueClockOuts(data);
   const approvals = [...data.approvals].sort((a, b) => {
     const ar = a.reviewedAt ? 1 : 0;
     const br = b.reviewedAt ? 1 : 0;
@@ -59,6 +61,10 @@ function Overview() {
         <div className="sg-stat">
           <span>On site now</span>
           <div className="n">{onSite.length}</div>
+        </div>
+        <div className="sg-stat">
+          <span>Overdue clock-outs</span>
+          <div className="n">{overdue.length}</div>
         </div>
       </div>
       <div className="sg-split">
@@ -102,6 +108,32 @@ function Overview() {
           </div>
         </section>
       </div>
+      <section className="sg-card">
+        <h2>Overdue clock-outs</h2>
+        <p className="sg-muted">Still on site after the time they said they would leave.</p>
+        <div className="sg-list" style={{ marginTop: 14 }}>
+          {overdue.length === 0 ? (
+            <p className="sg-muted">Nobody is overdue.</p>
+          ) : (
+            overdue.map((r) => (
+              <Link key={r.id} to="/app/requests/$id" params={{ id: String(r.id) }} className="sg-list-item">
+                <div>
+                  <strong>{workerLabel(data, r.workerId, r)}</strong>
+                  <div className="sg-muted">
+                    {roomLabel(data, r.roomId)} · due {when(r.expectedClockOutAt)}
+                  </div>
+                </div>
+                <Badge tone="danger">Overdue</Badge>
+              </Link>
+            ))
+          )}
+        </div>
+        {overdue.length ? (
+          <p style={{ marginTop: 12 }}>
+            <Link to="/app/overdue">View all overdue</Link>
+          </p>
+        ) : null}
+      </section>
       <section className="sg-card">
         <h2>Access request approvals</h2>
         <p className="sg-muted">

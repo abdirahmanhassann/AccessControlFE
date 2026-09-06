@@ -210,6 +210,22 @@ export function pendingRequests(data: StaffData | null) {
   return data.requests.filter((r) => /^pending$/i.test(effectiveStatus(r, data.approvals)));
 }
 
+export function isOverdueClockOut(req: AccessRequest, approvals: AccessRequestApproval[] = []) {
+  if (req.clockedOutAt || req.completedAt) return false;
+  if (!req.clockedInAt || !req.expectedClockOutAt) return false;
+  const status = effectiveStatus(req, approvals);
+  if (!/^approved$/i.test(String(status))) return false;
+  const due = Date.parse(req.expectedClockOutAt);
+  return Number.isFinite(due) && due < Date.now();
+}
+
+export function overdueClockOuts(data: StaffData | null) {
+  if (!data) return [];
+  return data.requests
+    .filter((r) => isOverdueClockOut(r, data.approvals))
+    .sort((a, b) => String(a.expectedClockOutAt).localeCompare(String(b.expectedClockOutAt)));
+}
+
 export function isStaffRole(role?: string | null) {
   const r = String(role ?? "").toLowerCase();
   return r === "admin" || r === "sitemanager" || r === "manager" || r === "viewer";

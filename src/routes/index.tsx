@@ -24,7 +24,7 @@ function Home() {
           <div className="sg-kicker">Construction site access</div>
           <h1>Room access, without the clipboard.</h1>
           <p className="sg-lede">
-            Workers verify by SMS, pick the site, tower and room, then wait for the manager
+            Workers verify by SMS, pick the site and room, then wait for the manager
             for that department. Every visit is photographed, timed, and stored for audit.
           </p>
           <div className="sg-cta-row">
@@ -41,7 +41,7 @@ function Home() {
           <div className="sg-step-list">
             {[
               ["Verify", "Phone number + one-time SMS code."],
-              ["Request", "Site, tower, department, room, job, and supervisor."],
+              ["Request", "Site, department, room, job, and supervisor."],
               ["Approve", "Only the manager for that department reviews it."],
               ["Leave", "Photo of the area, then clock out."],
             ].map(([title, body], i) => (
@@ -94,7 +94,7 @@ function Home() {
 
       <footer className="sg-foot">
         <span>SiteGate · live site access</span>
-        <Link to="/signup">Create a manager account</Link>
+        <Link to="/login">Manager sign in</Link>
       </footer>
     </div>
   );

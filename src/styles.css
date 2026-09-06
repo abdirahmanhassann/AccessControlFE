@@ -712,6 +712,18 @@
   border: 1px dashed var(--line-strong);
   background: var(--surface);
 }
+.sg-camera {
+  display: grid;
+  gap: 10px;
+}
+.sg-camera-video {
+  width: 100%;
+  aspect-ratio: 4/3;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  background: #111;
+  border: 1px solid var(--line);
+}
 
 /* ---------- manager shell ---------- */
 .sg-shell {
@@ -819,7 +831,7 @@
 }
 .sg-stats {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
   gap: 12px;
 }
 .sg-stat {

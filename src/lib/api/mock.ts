@@ -20,9 +20,9 @@ import {
   type WorkAreaManager,
   type Worker,
 } from "./types";
-import { locationDisplay } from "@/lib/location";
+import { locationDisplay, matchEnteredRoom, parseEnteredRoom } from "@/lib/location";
 
-const KEY = "sitegate.db.v5";
+const KEY = "sitegate.db.v7";
 
 type Db = {
   users: User[];
@@ -374,6 +374,28 @@ function seed(): Db {
       completedAt: hoursAgo(47),
       createdAt: hoursAgo(52),
     },
+    {
+      id: 6,
+      workerId: 1,
+      roomId: 3,
+      status: "Approved",
+      reason: "Second fix",
+      workType: "Electrical",
+      description: "Socket pack-out in apartment 13.4. Still on site past the booked window.",
+      phoneNumber: "07700900123",
+      supervisorName: "Neil Brennan",
+      workFrom: hoursAgo(5),
+      workTo: hoursAgo(2),
+      towerName: "Tower 1",
+      locationLabel: "Apartment 13.4",
+      approvedAt: hoursAgo(5.2),
+      rejectedAt: null,
+      clockedInAt: hoursAgo(4.5),
+      expectedClockOutAt: hoursAgo(2),
+      clockedOutAt: null,
+      completedAt: null,
+      createdAt: hoursAgo(5.5),
+    },
   ];
 
   const approvals: AccessRequestApproval[] = [
@@ -411,13 +433,13 @@ function seed(): Db {
       reviewedAt: null,
     },
     {
-      id: 5,
-      accessRequestId: 3,
-      approverUserId: 3,
-      status: "Pending",
-      comment: "",
-      createdAt: hoursAgo(0.25),
-      reviewedAt: null,
+      id: 6,
+      accessRequestId: 6,
+      approverUserId: 2,
+      status: "Approved",
+      comment: "Keep the corridor clear.",
+      createdAt: hoursAgo(5.2),
+      reviewedAt: hoursAgo(5.2),
     },
   ];
 
@@ -464,6 +486,20 @@ function seed(): Db {
     },
     {
       id: 3,
+      userId: 2,
+      workerId: 2,
+      accessRequestId: 2,
+      type: "NewRequest",
+      channel: "SMS",
+      message:
+        "Lucy Chen requested access to Apartment 13.3 at Riverside (Tower 1). Open SiteGate to approve or reject.",
+      status: "Sent",
+      sentAt: hoursAgo(0.6),
+      readAt: null,
+      createdAt: hoursAgo(0.6),
+    },
+    {
+      id: 4,
       userId: null,
       workerId: 1,
       accessRequestId: 1,
@@ -573,11 +609,11 @@ function seed(): Db {
       departmentRoomMappings: 1,
       departmentManagerMappings: 8,
       windows: wid,
-      requests: 6,
-      approvals: 6,
+      requests: 7,
+      approvals: 7,
       photos: 2,
       otps: 1,
-      notifications: 4,
+      notifications: 5,
       audits: 6,
     },
   };
@@ -731,6 +767,47 @@ function findRoomBundle(qr: string): ScanQrResult {
   return bundleRoom(room);
 }
 
+function findOrCreateRoom(workAreaId: number, roomText: string, roomId = 0): Room {
+  const db = load();
+  if (roomId) {
+    const hit = db.rooms.find((r) => r.id === roomId);
+    if (hit) return hit;
+  }
+  const onTower = db.rooms.filter((r) => r.workAreaId === workAreaId && r.isActive !== false);
+  const matched = matchEnteredRoom(onTower, roomText);
+  if (matched) return matched;
+  if (!workAreaId || !roomText.trim()) throw new ApiError(400, "Enter the room.");
+  const parsed = parseEnteredRoom(roomText);
+  const room: Room = {
+    id: nextId(db, "rooms"),
+    workAreaId,
+    roomNumber: parsed.roomNumber,
+    name: parsed.name,
+    qrCodeIdentifier: `SG-${token().slice(0, 8).toUpperCase()}`,
+    description: "Created from worker access request",
+    isActive: true,
+    locationKind: parsed.locationKind,
+  };
+  db.rooms.push(room);
+  persist();
+  return room;
+}
+
+function ensureDepartmentRoomLink(departmentId: number, roomId: number) {
+  if (!departmentId || !roomId) return;
+  const db = load();
+  const exists = db.departmentRoomMappings.some(
+    (m) => m.departmentId === departmentId && m.roomId === roomId,
+  );
+  if (exists) return;
+  db.departmentRoomMappings.push({
+    id: nextId(db, "departmentRoomMappings"),
+    departmentId,
+    roomId,
+  });
+  persist();
+}
+
 function managersForRoom(roomId: number, departmentId = 0): User[] {
   const db = load();
   if (departmentId) {
@@ -829,6 +906,7 @@ const handlers: Record<string, (body: Body) => unknown> = {
   },
 
   "/Access/signup": (body) => {
+    requireStaff(body as { token?: string });
     const db = load();
     const email = String(body.email ?? "").trim().toLowerCase();
     const password = String(body.password ?? "");
@@ -850,6 +928,56 @@ const handlers: Record<string, (body: Body) => unknown> = {
     db.passwords[String(user.id)] = password;
     persist();
     return publicUser(user);
+  },
+  "/Access/requestpasswordreset": (body) => {
+    const email = String(body.email ?? body.Email ?? "").trim().toLowerCase();
+    const db = load();
+    const user = db.users.find((u) => u.email.toLowerCase() === email && u.isActive !== false);
+    if (!user?.phoneNumber) return { sent: true };
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    db.otps.unshift({
+      id: nextId(db, "otps"),
+      workerId: null,
+      phoneNumber: digits(user.phoneNumber),
+      codeHash: code,
+      expiresAt: iso(10 * 60_000),
+      verifiedAt: null,
+      attemptCount: 0,
+    });
+    persist();
+    return { sent: true, code };
+  },
+  "/Access/resetpassword": (body) => {
+    const email = String(body.email ?? body.Email ?? "").trim().toLowerCase();
+    const code = String(body.code ?? body.Code ?? "");
+    const password = String(body.password ?? body.Password ?? "");
+    if (password.length < 8) throw new ApiError(400, "Password must be at least 8 characters.");
+    const db = load();
+    const user = db.users.find((u) => u.email.toLowerCase() === email);
+    if (!user) throw new ApiError(400, "That reset code is not valid.");
+    const otp = db.otps.find(
+      (o) =>
+        !o.verifiedAt &&
+        o.codeHash === code &&
+        digits(o.phoneNumber) === digits(user.phoneNumber) &&
+        new Date(o.expiresAt).getTime() > Date.now(),
+    );
+    if (!otp) throw new ApiError(401, "That reset code is not valid or has expired.");
+    otp.verifiedAt = iso();
+    db.passwords[String(user.id)] = password;
+    persist();
+    return true;
+  },
+  "/Access/setuserpassword": (body) => {
+    requireStaff(body as { token?: string });
+    const password = String(body.password ?? body.Password ?? "");
+    if (password.length < 8) throw new ApiError(400, "Password must be at least 8 characters.");
+    const db = load();
+    const user = db.users.find((u) => u.id === Number(body.id ?? body.Id));
+    if (!user) throw new ApiError(404, "User not found.");
+    db.passwords[String(user.id)] = password;
+    persist();
+    return true;
   },
 
   "/Access/scanqr": (body) => {
@@ -897,9 +1025,13 @@ const handlers: Record<string, (body: Body) => unknown> = {
 
   "/Access/getworkareas": (body) => {
     const siteId = Number(body.siteId ?? body.SiteId ?? 0);
-    if (!siteId) requireStaff(body as { token?: string });
     const rows = load().workAreas.filter((a) => a.isActive !== false);
-    return siteId ? rows.filter((a) => a.siteId === siteId) : rows;
+    const sites = load().sites;
+    const mapped = rows.map((a) => ({
+      ...a,
+      siteName: sites.find((s) => s.id === a.siteId)?.name,
+    }));
+    return siteId ? mapped.filter((a) => a.siteId === siteId) : mapped;
   },
   "/Access/insertworkarea": (body) => {
     requireStaff(body as { token?: string });
@@ -1071,7 +1203,7 @@ const handlers: Record<string, (body: Body) => unknown> = {
       createdAt: iso(),
     };
     db.users.push(user);
-    db.passwords[String(user.id)] = "SiteGate1!";
+    db.passwords[String(user.id)] = String(body.password ?? body.Password ?? "SiteGate1!");
     persist();
     return publicUser(user);
   },
@@ -1321,13 +1453,17 @@ const handlers: Record<string, (body: Body) => unknown> = {
     return sliced.map((r) => ({ ...r, total }));
   },
   "/Access/insertaccessrequest": (body) => {
-    const db = load();
     const phone = digits(String(body.phoneNumber ?? ""));
-    let worker = db.workers.find((w) => w.id === Number(body.workerId));
-    if (!worker && phone) worker = db.workers.find((w) => digits(w.phoneNumber) === phone);
+    const db0 = load();
+    let worker = db0.workers.find((w) => w.id === Number(body.workerId));
+    if (!worker && phone) worker = db0.workers.find((w) => digits(w.phoneNumber) === phone);
     if (!worker) throw new ApiError(400, "Worker not found. Register first.");
-    const room = db.rooms.find((r) => r.id === Number(body.roomId));
-    if (!room) throw new ApiError(404, "Room not found.");
+    const workAreaId = Number(body.workAreaId ?? body.WorkAreaId ?? 0);
+    const roomText = String(body.roomText ?? body.RoomText ?? body.roomNumber ?? body.RoomNumber ?? "").trim();
+    const room = findOrCreateRoom(workAreaId, roomText, Number(body.roomId ?? body.RoomId ?? 0));
+    const departmentId = Number(body.departmentId ?? body.DepartmentId ?? 0);
+    ensureDepartmentRoomLink(departmentId, room.id);
+    const db = load();
 
     const active = db.requests.find(
       (r) =>
@@ -1377,6 +1513,14 @@ const handlers: Record<string, (body: Body) => unknown> = {
         comment: "",
         createdAt: iso(),
         reviewedAt: null,
+      });
+      notify({
+        userId: assigned.id,
+        workerId: worker.id,
+        accessRequestId: req.id,
+        type: "NewRequest",
+        channel: "SMS",
+        message: `${worker.firstName} ${worker.lastName} requested access to ${locationDisplay(room)} at ${area?.name ?? "site"}. Open SiteGate to approve or reject.`,
       });
       notify({
         userId: assigned.id,

@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
+  AlertTriangle,
   Bell,
   Building2,
   ClipboardList,
@@ -20,12 +21,13 @@ import { BrandMark, Button } from "@/components/ui";
 import { clearSession, readSession } from "@/lib/session";
 import { useMounted } from "@/lib/use-mounted";
 import { API_BASE, USE_MOCK, api } from "@/lib/api/client";
-import { effectiveStatus } from "@/lib/staff-data";
+import { effectiveStatus, isOverdueClockOut } from "@/lib/staff-data";
 import type { Session } from "@/lib/api/types";
 
 const NAV = [
   { to: "/app", label: "Overview", icon: LayoutDashboard, exact: true },
   { to: "/app/requests", label: "Requests", icon: ClipboardList },
+  { to: "/app/overdue", label: "Overdue", icon: AlertTriangle },
   { to: "/app/rooms", label: "Locations", icon: MapPinned },
   { to: "/app/areas", label: "Towers", icon: Building2 },
   { to: "/app/departments", label: "Departments", icon: Network },
@@ -44,25 +46,27 @@ export function ManagerShell({ children }: { children?: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(0);
+  const [overdue, setOverdue] = useState(0);
 
   useEffect(() => {
     if (!mounted) return;
     const s = readSession();
     if (!s || s.kind !== "staff") {
-      void navigate({ to: "/login" });
+      void navigate({ to: "/" });
       return;
     }
     setSession(s);
     api
-      .getAccessRequests(s.token, { status: "Pending", take: 50 })
+      .getAccessRequests(s.token, { take: 200 })
       .then(async (rows) => {
         let approvals: import("@/lib/api/types").AccessRequestApproval[] = [];
         try {
-          approvals = await api.getApprovals(s.token, { take: 50 });
+          approvals = await api.getApprovals(s.token, { take: 200 });
         } catch {
           approvals = [];
         }
         setPending(rows.filter((r) => /^pending$/i.test(effectiveStatus(r, approvals))).length);
+        setOverdue(rows.filter((r) => isOverdueClockOut(r, approvals)).length);
       })
       .catch(() => {});
   }, [mounted, navigate, pathname]);
@@ -80,7 +84,7 @@ export function ManagerShell({ children }: { children?: ReactNode }) {
 
   function signOut() {
     clearSession();
-    void navigate({ to: "/login" });
+    void navigate({ to: "/" });
   }
 
   return (
@@ -105,6 +109,9 @@ export function ManagerShell({ children }: { children?: ReactNode }) {
                 {item.label}
                 {item.to === "/app/requests" && pending > 0 ? (
                   <span className="sg-nav-count">{pending}</span>
+                ) : null}
+                {item.to === "/app/overdue" && overdue > 0 ? (
+                  <span className="sg-nav-count">{overdue}</span>
                 ) : null}
               </Link>
             );
