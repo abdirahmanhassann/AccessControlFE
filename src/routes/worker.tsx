@@ -753,6 +753,7 @@ function FormStep() {
         workerId: worker.id,
         roomId,
         workAreaId: Number(form.towerId),
+        siteId: Number(form.siteId) || siteId,
         roomText,
         departmentId: Number(form.departmentId),
         locationKind: parsedRoom.locationKind,
@@ -987,7 +988,7 @@ function FormStep() {
         <Input
           value={form.roomText}
           list="sg-tower-rooms"
-          onChange={(e) => setForm({ ...form, roomText: e.target.value, approverUserId: "" })}
+          onChange={(e) => setForm({ ...form, roomText: e.target.value })}
           placeholder="e.g. 13.2"
           required
           disabled={!form.towerId}

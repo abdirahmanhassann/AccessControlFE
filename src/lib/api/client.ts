@@ -107,6 +107,11 @@ export function asArray<T>(value: unknown): T[] {
 }
 
 function unwrapEnvelope(payload: unknown): unknown {
+  if (typeof payload === "string") {
+    const parsed = decode(payload.trim());
+    if (parsed !== payload) return unwrapEnvelope(parsed);
+    return payload;
+  }
   if (!isPlainObject(payload)) return payload;
   const result = payload.Result ?? payload.result;
   const errorMessage = payload.ErrorMessage ?? payload.errorMessage;
@@ -153,7 +158,12 @@ async function parseBody(res: Response): Promise<unknown> {
         decoded.ErrorMessage ?? decoded.errorMessage ?? decoded.message ?? decoded.title ?? message,
       );
     } else if (typeof decoded === "string" && decoded) {
-      message = decoded;
+      const inner = decode(decoded);
+      if (isPlainObject(inner)) {
+        message = String(inner.ErrorMessage ?? inner.errorMessage ?? inner.message ?? decoded);
+      } else {
+        message = decoded;
+      }
     } else if (text) {
       message = text;
     }
@@ -829,6 +839,7 @@ export const api = {
     workerId: number;
     roomId?: number;
     workAreaId?: number;
+    siteId?: number;
     roomText?: string;
     departmentId?: number;
     locationKind?: string;
@@ -844,51 +855,36 @@ export const api = {
     const roomId = num(data.roomId);
     const workerId = num(data.workerId);
     const workAreaId = num(data.workAreaId);
+    const siteId = num(data.siteId);
     const roomText = String(data.roomText ?? "").trim();
-    if (!roomId && (!workAreaId || !roomText)) {
+    if (!workAreaId && !siteId) {
+      throw new ApiError(400, "Choose the site.");
+    }
+    if (!roomText && !roomId) {
       throw new ApiError(400, "Enter the room.");
     }
     const payload: Record<string, unknown> = {
-      phoneNumber: data.phoneNumber,
       PhoneNumber: data.phoneNumber,
-      workerId,
       WorkerId: workerId,
-      roomId,
-      RoomId: roomId,
-      workAreaId,
       WorkAreaId: workAreaId,
-      roomText,
+      SiteId: siteId,
       RoomText: roomText,
-      roomNumber: roomText,
       RoomNumber: roomText,
-      departmentId: num(data.departmentId),
       DepartmentId: num(data.departmentId),
-      locationKind: data.locationKind ?? "",
       LocationKind: data.locationKind ?? "",
-      reason: data.reason,
       Reason: data.reason,
-      workType: data.workType,
       WorkType: data.workType,
-      description: data.description,
       Description: data.description,
-      supervisorName: data.supervisorName ?? "",
       SupervisorName: data.supervisorName ?? "",
-      workFrom: data.workFrom ?? "",
-      WorkFrom: data.workFrom ?? "",
-      workTo: data.workTo ?? "",
-      WorkTo: data.workTo ?? "",
+      WorkFrom: data.workFrom || null,
+      WorkTo: data.workTo || null,
     };
-    if (data.qrCodeIdentifier) {
-      payload.qrCodeIdentifier = data.qrCodeIdentifier;
-      payload.QrCodeIdentifier = data.qrCodeIdentifier;
-    }
+    if (roomId) payload.RoomId = roomId;
+    if (data.qrCodeIdentifier) payload.QrCodeIdentifier = data.qrCodeIdentifier;
     const approverUserId = num(data.approverUserId);
-    if (approverUserId) {
-      payload.approverUserId = approverUserId;
-      payload.ApproverUserId = approverUserId;
-    }
+    if (approverUserId) payload.ApproverUserId = approverUserId;
     const created = await post<unknown>("/Access/insertaccessrequest", payload);
-    const resolvedRoomId = pickNum(coerceRow(created), ["roomId"]) || roomId;
+    const resolvedRoomId = pickNum(coerceRow(created), ["roomId", "id"]) || roomId;
     return asRequest(created, {
       ...data,
       roomId: resolvedRoomId,

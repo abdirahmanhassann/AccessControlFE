@@ -1453,12 +1453,17 @@ const handlers: Record<string, (body: Body) => unknown> = {
     return sliced.map((r) => ({ ...r, total }));
   },
   "/Access/insertaccessrequest": (body) => {
-    const phone = digits(String(body.phoneNumber ?? ""));
+    const phone = digits(String(body.phoneNumber ?? body.PhoneNumber ?? ""));
     const db0 = load();
-    let worker = db0.workers.find((w) => w.id === Number(body.workerId));
+    let worker = db0.workers.find((w) => w.id === Number(body.workerId ?? body.WorkerId));
     if (!worker && phone) worker = db0.workers.find((w) => digits(w.phoneNumber) === phone);
     if (!worker) throw new ApiError(400, "Worker not found. Register first.");
-    const workAreaId = Number(body.workAreaId ?? body.WorkAreaId ?? 0);
+    let workAreaId = Number(body.workAreaId ?? body.WorkAreaId ?? 0);
+    const siteId = Number(body.siteId ?? body.SiteId ?? 0);
+    if (!db0.workAreas.some((a) => a.id === workAreaId)) {
+      const onSite = db0.workAreas.filter((a) => a.siteId === (workAreaId || siteId));
+      if (onSite.length === 1) workAreaId = onSite[0].id;
+    }
     const roomText = String(body.roomText ?? body.RoomText ?? body.roomNumber ?? body.RoomNumber ?? "").trim();
     const room = findOrCreateRoom(workAreaId, roomText, Number(body.roomId ?? body.RoomId ?? 0));
     const departmentId = Number(body.departmentId ?? body.DepartmentId ?? 0);
@@ -1481,9 +1486,9 @@ const handlers: Record<string, (body: Body) => unknown> = {
       workerId: worker.id,
       roomId: room.id,
       status: "Pending",
-      reason: String(body.reason ?? ""),
-      workType: String(body.workType ?? ""),
-      description: String(body.description ?? ""),
+      reason: String(body.reason ?? body.Reason ?? ""),
+      workType: String(body.workType ?? body.WorkType ?? ""),
+      description: String(body.description ?? body.Description ?? ""),
       phoneNumber: phone || worker.phoneNumber,
       supervisorName: String(body.supervisorName ?? body.SupervisorName ?? ""),
       workFrom,
@@ -1499,7 +1504,7 @@ const handlers: Record<string, (body: Body) => unknown> = {
       createdAt: iso(),
     };
     db.requests.unshift(req);
-    const chosenId = Number(body.approverUserId);
+    const chosenId = Number(body.approverUserId ?? body.ApproverUserId);
     const assigned =
       (chosenId ? db.users.find((u) => u.id === chosenId) : undefined) ??
       managersForRoom(room.id)[0] ??
