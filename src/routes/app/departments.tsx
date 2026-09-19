@@ -1,6 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Badge, Button, Field, PageSkeleton, Select, toast } from "@/components/ui";
+import { Button, Field, Input, PageSkeleton, Select, toast } from "@/components/ui";
 import { readSession } from "@/lib/session";
 import { useStaffData } from "@/lib/staff-data";
 import { useMounted } from "@/lib/use-mounted";
@@ -21,10 +21,14 @@ function DepartmentsPage() {
   const [managersMap, setManagersMap] = useState<DepartmentManagerMapping[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newSiteId, setNewSiteId] = useState("");
+  const [newDescription, setNewDescription] = useState("");
+  const [showCreate, setShowCreate] = useState(false);
   useEffect(() => setToken(readSession()?.token), []);
   const { data, loading } = useStaffData(token);
 
-  async function reloadMaps(t: string) {
+  async function reloadMaps(t: string, preferId?: number) {
     const [deps, rooms, managers] = await Promise.all([
       api.getDepartments(t),
       api.getDepartmentRoomMappings(t),
@@ -33,20 +37,74 @@ function DepartmentsPage() {
     setDepartments(deps);
     setRoomsMap(rooms);
     setManagersMap(managers);
-    if (selected == null && deps[0]) setSelected(deps[0].id);
+    if (preferId && deps.some((d) => d.id === preferId)) {
+      setSelected(preferId);
+    } else if (selected == null && deps[0]) {
+      setSelected(deps[0].id);
+    } else if (selected != null && !deps.some((d) => d.id === selected) && deps[0]) {
+      setSelected(deps[0].id);
+    }
   }
 
   useEffect(() => {
     if (!token) return;
-    void reloadMaps(token).catch((err) => toast(err instanceof Error ? err.message : "Could not load departments"));
+    void reloadMaps(token).catch((err) =>
+      toast(err instanceof Error ? err.message : "Could not load departments"),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  useEffect(() => {
+    if (!data?.sites?.length) return;
+    if (!newSiteId) setNewSiteId(String(data.sites[0].id));
+  }, [data?.sites, newSiteId]);
+
   const dept = departments.find((d) => d.id === selected) ?? null;
-  const rooms = useMemo(() => roomsMap.filter((m) => m.departmentId === selected), [roomsMap, selected]);
-  const managers = useMemo(() => managersMap.filter((m) => m.departmentId === selected), [managersMap, selected]);
+  const rooms = useMemo(
+    () => roomsMap.filter((m) => m.departmentId === selected),
+    [roomsMap, selected],
+  );
+  const managers = useMemo(
+    () => managersMap.filter((m) => m.departmentId === selected),
+    [managersMap, selected],
+  );
 
   if (!mounted || loading || !data) return <PageSkeleton />;
+
+  async function createDepartment() {
+    const t = readSession()?.token;
+    const name = newName.trim();
+    const siteId = Number(newSiteId);
+    if (!t || !name || !siteId) {
+      toast("Choose a site and enter a department name.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await api.insertDepartment(t, {
+        siteId,
+        name,
+        description: newDescription.trim() || undefined,
+      });
+      const deps = await api.getDepartments(t);
+      setDepartments(deps);
+      const created =
+        deps.find(
+          (d) =>
+            d.siteId === siteId &&
+            d.name.trim().toLowerCase() === name.toLowerCase(),
+        ) ?? deps[deps.length - 1];
+      await reloadMaps(t, created?.id);
+      setNewName("");
+      setNewDescription("");
+      setShowCreate(false);
+      toast(`Created ${name}`);
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Could not create department");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function add(kind: "room" | "manager", value: number) {
     const t = readSession()?.token;
@@ -55,7 +113,11 @@ function DepartmentsPage() {
     try {
       if (kind === "room") await api.insertDepartmentRoomMapping(t, { departmentId: selected, roomId: value });
       if (kind === "manager") {
-        await api.insertDepartmentManagerMapping(t, { departmentId: selected, userId: value, isPrimary: false });
+        await api.insertDepartmentManagerMapping(t, {
+          departmentId: selected,
+          userId: value,
+          isPrimary: false,
+        });
       }
       await reloadMaps(t);
     } catch (err) {
@@ -87,6 +149,53 @@ function DepartmentsPage() {
         department that owns the room <em>and</em> that department belongs to the room's site.
         Workers can request any room.
       </p>
+
+      <div className="sg-card" style={{ padding: 16, marginBottom: 16 }}>
+        <div className="sg-actions" style={{ justifyContent: "space-between", marginBottom: showCreate ? 12 : 0 }}>
+          <strong>Departments</strong>
+          <Button size="sm" variant="primary" disabled={busy} onClick={() => setShowCreate((v) => !v)}>
+            {showCreate ? "Cancel" : "New department"}
+          </Button>
+        </div>
+        {showCreate ? (
+          <div className="sg-form-grid" style={{ gap: 12 }}>
+            <Field label="Site">
+              <Select value={newSiteId} onChange={(e) => setNewSiteId(e.target.value)}>
+                <option value="">Select site</option>
+                {data.sites.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Name">
+              <Input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="e.g. Mechanical"
+                maxLength={200}
+              />
+            </Field>
+            <Field label="Description (optional)">
+              <Input
+                value={newDescription}
+                onChange={(e) => setNewDescription(e.target.value)}
+                placeholder="What this department covers"
+                maxLength={500}
+              />
+            </Field>
+            <Button
+              variant="primary"
+              disabled={busy || !newName.trim() || !newSiteId}
+              onClick={() => void createDepartment()}
+            >
+              {busy ? "Saving…" : "Create department"}
+            </Button>
+          </div>
+        ) : null}
+      </div>
+
       <div className="sg-toolbar">
         <Select value={String(selected ?? "")} onChange={(e) => setSelected(Number(e.target.value))}>
           <option value="">Select department</option>
@@ -98,7 +207,10 @@ function DepartmentsPage() {
         </Select>
       </div>
       {!dept ? (
-        <p className="sg-empty">Run Database/Mappings.sql then refresh. Departments seed from work areas.</p>
+        <p className="sg-empty">
+          No departments yet. Use <strong>New department</strong> above, or seed from work areas via
+          Database/Mappings.sql.
+        </p>
       ) : (
         <div className="sg-list">
           <MappingBlock
@@ -123,7 +235,11 @@ function DepartmentsPage() {
               label: `${m.firstName ?? ""} ${m.lastName ?? ""}`.trim() || `User #${m.userId}`,
             }))}
             options={data.users
-              .filter((u) => /manager|admin/i.test(String(u.role)) && !managers.some((m) => m.userId === u.id))
+              .filter(
+                (u) =>
+                  /manager|admin/i.test(String(u.role)) &&
+                  !managers.some((m) => m.userId === u.id),
+              )
               .map((u) => ({ id: u.id, label: `${u.firstName} ${u.lastName} · ${u.role}` }))}
             onAdd={(id) => add("manager", id)}
             onRemove={(id) => remove("manager", id)}
