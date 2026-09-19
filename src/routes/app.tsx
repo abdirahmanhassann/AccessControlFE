@@ -6,8 +6,8 @@ export const Route = createFileRoute("/app")({
   beforeLoad: () => {
     if (typeof window === "undefined") return;
     const session = readSession();
-    if (!session || session.kind !== "staff") {
-      throw redirect({ to: "/" });
+    if (!session || session.kind !== "staff" || !session.token) {
+      throw redirect({ to: "/login" });
     }
   },
   component: ManagerShell,
