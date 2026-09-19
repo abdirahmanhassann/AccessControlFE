@@ -6,65 +6,173 @@ import {
   pickNum,
   pickStr,
   post,
-  API_BASE,
-  USE_MOCK,
 } from "./client-http";
 import {
   asApproval,
   asAudit,
-  asDepartment,
-  asRequestRow,
-  asRoom,
-  asSite,
-  asUserRow,
-  asWorkArea,
   asWorkerRow,
   coerceRow,
-  allFilterBody,
 } from "./client-mappers";
 import {
   asPagedList,
-  asRequest,
-  asWorker,
   dual,
   listFilterBody,
-  placeholderUser,
-  resolveRoom,
 } from "./client-list";
-import type { ListFilter, LoginResult, PagedList } from "./client-list";
-import { readSession, readWorkerSession } from "@/lib/session";
+import type { ListFilter } from "./client-list";
 import type {
   AccessPhoto,
   AccessRequest,
   AccessRequestApproval,
-  AccessWindow,
   AuditEvent,
-  CreateUserRequest,
-  Department,
-  DepartmentManagerMapping,
-  DepartmentRoomMapping,
-  LoginRequest,
   Notification,
   OTPVerification,
-  Room,
-  ScanQrResult,
-  Session,
-  Site,
-  User,
-  WorkArea,
-  WorkAreaManager,
-  Worker,
-  WorkerSiteMapping,
-  RoomManager,
 } from "./types";
 
 export const apiPart2 = {
   updateAccessRequest: (token: string | undefined, data: Partial<AccessRequest> & { id: number }) => {
     const payload: Record<string, unknown> = { ...data };
-    if (token) {
-      payload.token = token;
-      payload.Token = token;
-    }
-    return post("/Access/updateaccessrequest", dual(payload));
+    if (token) payload.token = token;
+    return post<AccessRequest | null>("/Access/updateaccessrequest", dual(payload));
   },
+
+  getApprovals: async (token: string, filter?: ListFilter) =>
+    asPagedList(
+      await post("/Access/getaccessrequestapprovals", listFilterBody(token, filter)),
+      (row) => asApproval(row),
+      (row) => Boolean(row.id || row.accessRequestId),
+    ),
+  insertApproval: (
+    token: string,
+    data: { accessRequestId: number; approverUserId: number; status: string; comment: string },
+  ) =>
+    post<AccessRequestApproval | null>(
+      "/Access/insertaccessrequestapproval",
+      dual({
+        token,
+        accessRequestId: data.accessRequestId,
+        approverUserId: data.approverUserId,
+        status: data.status,
+        comment: data.comment ?? "",
+      }),
+    ),
+  updateApproval: (
+    token: string,
+    data: {
+      id: number;
+      accessRequestId: number;
+      status: string;
+      comment?: string | null;
+      reviewedAt?: string | null;
+      approverUserId?: number;
+      workerId?: number;
+      roomId?: number;
+      reason?: string | null;
+      workType?: string | null;
+      description?: string | null;
+    },
+  ) => {
+    const accessRequestApprovalId = num(data.id);
+    const accessRequestId = num(data.accessRequestId);
+    if (!accessRequestApprovalId) {
+      throw new ApiError(400, "AccessRequestApprovalId is required.");
+    }
+    if (!accessRequestId) {
+      throw new ApiError(400, "AccessRequestId is required.");
+    }
+    const reviewedAt = data.reviewedAt ?? new Date().toISOString().slice(0, 19);
+    const approved = /^approved$/i.test(data.status);
+    const rejected = /^rejected$/i.test(data.status);
+    const payload: Record<string, unknown> = {
+      token,
+      id: accessRequestApprovalId,
+      accessRequestApprovalId,
+      accessRequestId,
+      status: data.status,
+      comment: data.comment ?? "",
+      reviewedAt,
+      reason: data.reason ?? data.comment ?? "",
+      workType: data.workType ?? "",
+      description: data.description ?? "",
+      approvedAt: approved ? reviewedAt : null,
+      rejectedAt: rejected ? reviewedAt : null,
+    };
+    const approverUserId = num(data.approverUserId);
+    const workerId = num(data.workerId);
+    const roomId = num(data.roomId);
+    if (approverUserId) payload.approverUserId = approverUserId;
+    if (workerId) payload.workerId = workerId;
+    if (roomId) payload.roomId = roomId;
+    return post<AccessRequestApproval | null>("/Access/updateaccessrequestapproval", dual(payload));
+  },
+
+  getPhotos: (token: string) =>
+    post<AccessPhoto[]>("/Access/getaccessphotos", { token }).then(asArray<AccessPhoto>),
+  insertPhoto: (token: string, data: Omit<AccessPhoto, "id">) =>
+    post<AccessPhoto | null>("/Access/insertaccessphoto", { token, ...data }),
+  updatePhoto: (token: string, data: AccessPhoto) =>
+    post<AccessPhoto | null>("/Access/updateaccessphoto", { token, ...data }),
+
+  getOtps: (token: string) =>
+    post<OTPVerification[]>("/Access/getotpverifications", { token }).then(asArray<OTPVerification>),
+  insertOtp: (phoneNumber: string, expiresAt: string) =>
+    post<OTPVerification & { code?: string }>("/Access/insertotpverification", {
+      phoneNumber,
+      expiresAt,
+    }),
+  verifyOtp: async (code: number) => {
+    const data = await post<unknown>("/Access/verifyotp", { code });
+    const row = coerceRow(data);
+    const nested =
+      isPlainObject(data) && (isPlainObject(data.worker) || isPlainObject(data.Worker))
+        ? coerceRow(data.worker ?? data.Worker)
+        : {};
+    const merged = { ...nested, ...row };
+    const workerId = pickNum(merged, ["workerId", "id"]);
+    const hasWorkerFields = Boolean(
+      pickStr(merged, ["firstName"]) ||
+        pickStr(merged, ["lastName"]) ||
+        pickStr(merged, ["companyName"]) ||
+        pickStr(merged, ["workerPhoneNumber"]),
+    );
+    const worker =
+      workerId && (hasWorkerFields || pickStr(merged, ["phoneNumber"]))
+        ? asWorkerRow(merged)
+        : workerId
+          ? asWorkerRow({ ...merged, id: workerId, workerId })
+          : null;
+    return {
+      verified: true,
+      token: String(merged.token ?? row.token ?? ""),
+      worker: worker?.id ? worker : null,
+      phoneNumber: String(merged.phoneNumber ?? merged.workerPhoneNumber ?? ""),
+    };
+  },
+  updateOtp: (token: string, data: OTPVerification) =>
+    post<OTPVerification | null>("/Access/updateotpverification", { token, ...data }),
+
+  getNotifications: (token: string) =>
+    post<Notification[]>("/Access/getnotifications", { token }).then(asArray<Notification>),
+  insertNotification: (token: string, data: Partial<Notification>) =>
+    post<Notification | null>("/Access/insertnotification", { token, ...data }),
+  updateNotification: (token: string, data: Partial<Notification> & { id: number }) =>
+    post<Notification | null>("/Access/updatenotification", { token, ...data }),
+
+  getAudits: async (token: string) =>
+    asArray<unknown>(await post("/Access/getauditevents", { token }))
+      .map((row) => asAudit(row))
+      .filter((row) => row.id || row.eventType),
+  insertAudit: (token: string, data: Partial<AuditEvent>) =>
+    post<AuditEvent | null>(
+      "/Access/insertauditevent",
+      dual({
+        token,
+        accessRequestId: data.accessRequestId ?? null,
+        workerId: data.workerId ?? null,
+        userId: data.userId ?? null,
+        eventType: data.eventType ?? "Note",
+        description: data.description ?? "",
+        ipAddress: data.ipAddress ?? "",
+        metadata: data.metadata ?? "",
+      }),
+    ),
 };
