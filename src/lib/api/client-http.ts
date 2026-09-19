@@ -1,31 +1,6 @@
 import { ApiError } from "./types";
 import { mockHandle } from "./mock";
-import { readSession, readWorkerSession } from "@/lib/session";
 import { forceStaffLogin } from "./auth-redirect";
-import type {
-  AccessPhoto,
-  AccessRequest,
-  AccessRequestApproval,
-  AccessWindow,
-  AuditEvent,
-  CreateUserRequest,
-  Department,
-  DepartmentManagerMapping,
-  DepartmentRoomMapping,
-  LoginRequest,
-  Notification,
-  OTPVerification,
-  Room,
-  ScanQrResult,
-  Session,
-  Site,
-  User,
-  WorkArea,
-  WorkAreaManager,
-  Worker,
-  WorkerSiteMapping,
-  RoomManager,
-} from "./types";
 
 const DEFAULT_LIVE = "https://localhost:7105";
 const rawBase = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.trim() ?? DEFAULT_LIVE;
@@ -192,6 +167,39 @@ export async function post<T>(path: string, body: unknown): Promise<T> {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(body ?? {}),
+    });
+  } catch {
+    throw new ApiError(
+      0,
+      `Cannot reach AccessControl at ${API_BASE}. Keep the API running, and open that address once in this browser so the HTTPS certificate is trusted.`,
+    );
+  }
+  const data = camelize(await parseBody(res));
+  return data as T;
+}
+
+/** Multipart form POST (e.g. photo upload). Do not set Content-Type — browser sets boundary. */
+export async function postForm<T>(path: string, form: FormData): Promise<T> {
+  if (USE_MOCK) {
+    await delay(180 + Math.floor(Math.random() * 120));
+    try {
+      const body: Record<string, unknown> = {};
+      form.forEach((value, key) => {
+        if (typeof value === "string") body[key] = value;
+        else body[key] = value.name || "file";
+      });
+      return mockHandle(path, body) as T;
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      throw new ApiError(500, err instanceof Error ? err.message : "Request failed");
+    }
+  }
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      method: "POST",
+      headers: { Accept: "application/json" },
+      body: form,
     });
   } catch {
     throw new ApiError(
