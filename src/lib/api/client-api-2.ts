@@ -6,6 +6,7 @@ import {
   pickNum,
   pickStr,
   post,
+  postForm,
 } from "./client-http";
 import {
   asApproval,
@@ -27,6 +28,33 @@ import type {
   Notification,
   OTPVerification,
 } from "./types";
+
+export type InsertPhotoInput = {
+  accessRequestId: number;
+  photoType: string;
+  uploadedByWorkerId: number;
+  /** JPEG/PNG blob or File from camera / file input */
+  file?: Blob | File;
+  /** data:image/... URL from CameraCapture — converted to a blob */
+  dataUrl?: string;
+  fileName?: string;
+};
+
+async function toUploadFile(data: InsertPhotoInput): Promise<{ blob: Blob; fileName: string }> {
+  if (data.file) {
+    const fileName =
+      data.fileName ||
+      (data.file instanceof File ? data.file.name : "photo.jpg") ||
+      "photo.jpg";
+    return { blob: data.file, fileName };
+  }
+  if (data.dataUrl) {
+    const res = await fetch(data.dataUrl);
+    const blob = await res.blob();
+    return { blob, fileName: data.fileName || "photo.jpg" };
+  }
+  throw new ApiError(400, "No photo file provided.");
+}
 
 export const apiPart2 = {
   updateAccessRequest: (token: string | undefined, data: Partial<AccessRequest> & { id: number }) => {
@@ -107,8 +135,28 @@ export const apiPart2 = {
 
   getPhotos: (token: string) =>
     post<AccessPhoto[]>("/Access/getaccessphotos", { token }).then(asArray<AccessPhoto>),
-  insertPhoto: (token: string, data: Omit<AccessPhoto, "id">) =>
-    post<AccessPhoto | null>("/Access/insertaccessphoto", { token, ...data }),
+
+  /**
+   * Multipart upload matching BE InsertAccessPhoto([FromForm] ...).
+   * Returns storagePath string from the API Data field.
+   */
+  insertPhoto: async (token: string, data: InsertPhotoInput): Promise<string> => {
+    const { blob, fileName } = await toUploadFile(data);
+    const form = new FormData();
+    form.append("Token", token);
+    form.append("AccessRequestId", String(data.accessRequestId));
+    form.append("PhotoType", data.photoType || "ClockOut");
+    form.append("UploadedByWorkerId", String(data.uploadedByWorkerId || 0));
+    form.append("File", blob, fileName);
+    const result = await postForm<unknown>("/Access/insertaccessphoto", form);
+    if (typeof result === "string" && result) return result;
+    if (isPlainObject(result)) {
+      const path = pickStr(result, ["storagePath", "data", "path", "url"]);
+      if (path) return path;
+    }
+    return "";
+  },
+
   updatePhoto: (token: string, data: AccessPhoto) =>
     post<AccessPhoto | null>("/Access/updateaccessphoto", { token, ...data }),
 
