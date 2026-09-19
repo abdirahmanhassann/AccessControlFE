@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Badge, PageSkeleton } from "@/components/ui";
 import { readSession } from "@/lib/session";
-import { overdueClockOuts, roomLabel, useStaffData, workerLabel } from "@/lib/staff-data";
+import { dueClockOutAt, overdueClockOuts, roomLabel, useStaffData, workerLabel } from "@/lib/staff-data";
 import { when, whenExact } from "@/lib/format";
 import { useMounted } from "@/lib/use-mounted";
 
@@ -22,7 +22,8 @@ function OverduePage() {
     <div className="sg-content">
       {error ? <p className="sg-error">{error}</p> : null}
       <p className="sg-muted">
-        Workers who clocked in and are still on site after the time they said they would leave.
+        Workers who clocked in and are still on site after the <strong>Work to</strong> time on their
+        request.
       </p>
       <section className="sg-card" style={{ marginTop: 16 }}>
         <h2>Overdue clock-outs</h2>
@@ -30,17 +31,20 @@ function OverduePage() {
           {rows.length === 0 ? (
             <p className="sg-muted">Nobody is overdue.</p>
           ) : (
-            rows.map((r) => (
-              <Link key={r.id} to="/app/requests/$id" params={{ id: String(r.id) }} className="sg-list-item">
-                <div>
-                  <strong>{workerLabel(data, r.workerId, r)}</strong>
-                  <div className="sg-muted">
-                    {roomLabel(data, r.roomId)} · due {whenExact(r.expectedClockOutAt)}
+            rows.map((r) => {
+              const due = dueClockOutAt(r);
+              return (
+                <Link key={r.id} to="/app/requests/$id" params={{ id: String(r.id) }} className="sg-list-item">
+                  <div>
+                    <strong>{workerLabel(data, r.workerId, r)}</strong>
+                    <div className="sg-muted">
+                      {roomLabel(data, r.roomId)} · due {whenExact(due)}
+                    </div>
                   </div>
-                </div>
-                <Badge tone="danger">{when(r.expectedClockOutAt)}</Badge>
-              </Link>
-            ))
+                  <Badge tone="danger">{when(due)}</Badge>
+                </Link>
+              );
+            })
           )}
         </div>
       </section>
