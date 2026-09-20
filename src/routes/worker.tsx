@@ -16,11 +16,7 @@ import { QrImage } from "@/components/QrImage";
 import { api } from "@/lib/api/client";
 import { ApiError, PHOTO_TYPES, WORK_TYPES, type AccessRequest, type Department, type Room, type ScanQrResult, type Site, type User, type WorkArea } from "@/lib/api/types";
 import { compressImage } from "@/lib/image";
-<<<<<<< HEAD
-import { writeWorkerSession, readWorkerSession, clearWorkerSession } from "@/lib/session";
-=======
 import { writeWorkerSession, readWorkerSession, clearWorkerSession, readSession } from "@/lib/session";
->>>>>>> 6a4162c67436e34cf58a8c3329fdbdfb1cdad3e5
 import { useWorkerFlow } from "@/lib/worker-flow";
 import { prettyPhone, whenExact } from "@/lib/format";
 import { locationDisplay, matchEnteredRoom, parseEnteredRoom } from "@/lib/location";
@@ -86,7 +82,7 @@ async function locationForRequest(
   site: { siteId?: number; siteName?: string; siteAddress?: string },
 ): Promise<ScanQrResult | null> {
   if (!roomId || !site.siteId) return null;
-  const rooms = await api.listLocations({ siteId: site.siteId }).catch(() => []);
+  const rooms = await api.listLocations(0, site.siteId).catch(() => []);
   const room = rooms.find((r) => r.id === roomId);
   if (!room) return null;
   const towers = await api.listTowers(site.siteId).catch(() => []);
@@ -419,7 +415,7 @@ function OtpStep() {
       const session = readWorkerSession();
       const token = session?.token || result.token || "";
       const siteId = flow.siteId || flow.room?.siteId || 0;
-      const siteRooms = siteId ? await api.listLocations({ siteId }).catch(() => []) : [];
+      const siteRooms = siteId ? await api.listLocations(0, siteId).catch(() => []) : [];
       const siteRoomIds = siteRooms.map((r) => r.id);
       const requests = await loadWorkerRequests({
         token,
@@ -543,7 +539,7 @@ function FormStep() {
 
   useEffect(() => {
     let cancelled = false;
-    void Promise.all([api.listSites(), api.listTowers()])
+    void Promise.all([api.listSites(), api.listTowers(0)])
       .then(([siteRows, towerRows]) => {
         if (cancelled) return;
         setSites(siteRows);
@@ -617,7 +613,7 @@ function FormStep() {
       return;
     }
     let cancelled = false;
-    void api.listLocations({ workAreaId: towerId }).then((rows) => {
+    void api.listLocations(towerId).then((rows) => {
       if (cancelled) return;
       setLocations(rows);
       setForm((prev) => {
@@ -671,7 +667,7 @@ function FormStep() {
     if (!siteId && !workerId) return;
     let cancelled = false;
     void (async () => {
-      const siteRooms = siteId ? await api.listLocations({ siteId }).catch(() => []) : [];
+      const siteRooms = siteId ? await api.listLocations(0, siteId).catch(() => []) : [];
       const rows = await loadWorkerRequests({
         token: readWorkerSession()?.token,
         workerId,
@@ -1089,11 +1085,7 @@ function WaitingStep() {
       }
     }
     void poll();
-<<<<<<< HEAD
-    const id = window.setInterval(() => void poll(), 10000);
-=======
     const id = window.setInterval(() => void poll(), 10_000);
->>>>>>> 6a4162c67436e34cf58a8c3329fdbdfb1cdad3e5
     return () => {
       stop = true;
       window.clearInterval(id);
@@ -1263,26 +1255,6 @@ function ClockOutStep() {
       return;
     }
     const workerId = flow.request.workerId || flow.worker?.id || 0;
-<<<<<<< HEAD
-    const session = readWorkerSession();
-    const token = session?.token || "";
-    setBusy(true);
-    setError("");
-    try {
-      if (token) {
-        for (const photo of photos) {
-          await api.insertPhoto(token, {
-            accessRequestId: flow.request.id,
-            storagePath: photo.dataUrl,
-            originalFileName: photo.name,
-            contentType: photo.type,
-            fileSize: photo.size,
-            uploadedByWorkerId: workerId,
-            capturedAt: new Date().toISOString(),
-            photoType,
-          });
-        }
-=======
     const token = (readWorkerSession()?.token || readSession()?.token || "").trim();
     if (!token) {
       setError("Your session expired. Verify your phone again, then sign out.");
@@ -1299,7 +1271,6 @@ function ClockOutStep() {
           dataUrl: photo.dataUrl,
           fileName: photo.name,
         });
->>>>>>> 6a4162c67436e34cf58a8c3329fdbdfb1cdad3e5
       }
       const now = new Date().toISOString();
       await api.updateAccessRequest(token, {
