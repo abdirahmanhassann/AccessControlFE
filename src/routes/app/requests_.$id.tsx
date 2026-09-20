@@ -84,16 +84,6 @@ function RequestDetail() {
         comment,
         reviewedAt: new Date().toISOString().slice(0, 19),
       });
-      try {
-        await api.insertAudit(session.token, {
-          accessRequestId: requestId,
-          userId: session.user.id,
-          eventType: status,
-          description: `${session.user.firstName} ${session.user.lastName} marked request #${requestId} as ${status}.`,
-        });
-      } catch {
-        /* audit is best-effort */
-      }
       toast(status === "Approved" ? "Approved" : status === "Rejected" ? "Rejected" : "Cancelled");
       await reload();
     } catch (err) {
