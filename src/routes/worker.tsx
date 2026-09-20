@@ -16,7 +16,11 @@ import { QrImage } from "@/components/QrImage";
 import { api } from "@/lib/api/client";
 import { ApiError, PHOTO_TYPES, WORK_TYPES, type AccessRequest, type Department, type Room, type ScanQrResult, type Site, type User, type WorkArea } from "@/lib/api/types";
 import { compressImage } from "@/lib/image";
+<<<<<<< HEAD
 import { writeWorkerSession, readWorkerSession, clearWorkerSession } from "@/lib/session";
+=======
+import { writeWorkerSession, readWorkerSession, clearWorkerSession, readSession } from "@/lib/session";
+>>>>>>> 6a4162c67436e34cf58a8c3329fdbdfb1cdad3e5
 import { useWorkerFlow } from "@/lib/worker-flow";
 import { prettyPhone, whenExact } from "@/lib/format";
 import { locationDisplay, matchEnteredRoom, parseEnteredRoom } from "@/lib/location";
@@ -1085,7 +1089,11 @@ function WaitingStep() {
       }
     }
     void poll();
+<<<<<<< HEAD
     const id = window.setInterval(() => void poll(), 10000);
+=======
+    const id = window.setInterval(() => void poll(), 10_000);
+>>>>>>> 6a4162c67436e34cf58a8c3329fdbdfb1cdad3e5
     return () => {
       stop = true;
       window.clearInterval(id);
@@ -1255,6 +1263,7 @@ function ClockOutStep() {
       return;
     }
     const workerId = flow.request.workerId || flow.worker?.id || 0;
+<<<<<<< HEAD
     const session = readWorkerSession();
     const token = session?.token || "";
     setBusy(true);
@@ -1273,6 +1282,24 @@ function ClockOutStep() {
             photoType,
           });
         }
+=======
+    const token = (readWorkerSession()?.token || readSession()?.token || "").trim();
+    if (!token) {
+      setError("Your session expired. Verify your phone again, then sign out.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      for (const photo of photos) {
+        await api.insertPhoto(token, {
+          accessRequestId: flow.request.id,
+          photoType,
+          uploadedByWorkerId: workerId,
+          dataUrl: photo.dataUrl,
+          fileName: photo.name,
+        });
+>>>>>>> 6a4162c67436e34cf58a8c3329fdbdfb1cdad3e5
       }
       const now = new Date().toISOString();
       await api.updateAccessRequest(token, {

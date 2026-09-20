@@ -144,9 +144,13 @@ export const apiPart2 = {
     const { blob, fileName } = await toUploadFile(data);
     const form = new FormData();
     form.append("Token", token);
+    form.append("token", token);
     form.append("AccessRequestId", String(data.accessRequestId));
+    form.append("accessRequestId", String(data.accessRequestId));
     form.append("PhotoType", data.photoType || "ClockOut");
+    form.append("photoType", data.photoType || "ClockOut");
     form.append("UploadedByWorkerId", String(data.uploadedByWorkerId || 0));
+    form.append("uploadedByWorkerId", String(data.uploadedByWorkerId || 0));
     form.append("File", blob, fileName);
     const result = await postForm<unknown>("/Access/insertaccessphoto", form);
     if (typeof result === "string" && result) return result;
