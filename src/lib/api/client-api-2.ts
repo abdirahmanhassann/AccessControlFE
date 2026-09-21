@@ -192,9 +192,15 @@ export const apiPart2 = {
         : workerId
           ? asWorkerRow({ ...merged, id: workerId, workerId })
           : null;
+    // `/Access/verifyotp` answers with the worker row, not a session token:
+    // the API authorises the worker by the visit (see WorkerOwnsOpenRequest)
+    // rather than by a token. A token is read here in case one is ever added,
+    // and an empty string is the normal case, not a failure. A wrong code
+    // comes back as Result: false and has already thrown by this point.
+    const token = String(merged.token ?? row.token ?? "").trim();
     return {
       verified: true,
-      token: String(merged.token ?? row.token ?? ""),
+      token,
       worker: worker?.id ? worker : null,
       phoneNumber: String(merged.phoneNumber ?? merged.workerPhoneNumber ?? ""),
     };

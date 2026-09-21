@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   Camera,
   Check,
@@ -16,15 +16,18 @@ import { QrImage } from "@/components/QrImage";
 import { api } from "@/lib/api/client";
 import { ApiError, PHOTO_TYPES, WORK_TYPES, type AccessRequest, type Department, type Room, type ScanQrResult, type Site, type User, type WorkArea } from "@/lib/api/types";
 import { compressImage } from "@/lib/image";
-import { writeWorkerSession, readWorkerSession, clearWorkerSession, readSession } from "@/lib/session";
+import {
+  writeWorkerSession,
+  readWorkerSession,
+  clearWorkerSession,
+  type WorkerSession,
+} from "@/lib/session";
 import { useWorkerFlow } from "@/lib/worker-flow";
 import { prettyPhone, whenExact } from "@/lib/format";
 import { locationDisplay, matchEnteredRoom, parseEnteredRoom } from "@/lib/location";
 import { useMounted } from "@/lib/use-mounted";
 
-const DEMO_SITES = [
-  { qr: "SG-RIV-GATE", name: "Riverside", note: "Tower 1 + Tower 2. Demo clock-out: 07700 900123" },
-  { qr: "SG-OAK-GATE", name: "Oakridge Mixed-Use", note: "Tower A" },
+const DEMO_SITES: Array<{ qr: string; name: string; note: string }> = [
 ];
 
 const STEPS = ["phone", "otp", "form", "waiting", "visit", "clockout", "done"] as const;
@@ -40,6 +43,58 @@ function isOpenVisit(req: AccessRequest | null | undefined, siteRoomIds?: number
 
 function digits(value: string | undefined) {
   return (value || "").replace(/\D/g, "");
+}
+
+/**
+ * The verified worker session as reactive state, so a screen can tell the
+ * worker their device is no longer verified *before* they do the work —
+ * rather than after they have taken the photo and pressed the button.
+ *
+ * `refresh()` re-reads on demand and returns the fresh value, because the
+ * session can lapse (TTL) while the screen sits open. The `focus` listener
+ * catches the common case: the phone was locked mid-visit and is now back.
+ */
+function useWorkerSession(): [WorkerSession | null, () => WorkerSession | null] {
+  const [session, setSession] = useState<WorkerSession | null>(() => readWorkerSession());
+  const refresh = useCallback(() => {
+    const next = readWorkerSession();
+    setSession(next);
+    return next;
+  }, []);
+  useEffect(() => {
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => window.removeEventListener("focus", refresh);
+  }, [refresh]);
+  return [session, refresh];
+}
+
+/**
+ * Shown when the visit is still open but this device is not verified for it.
+ * Sending the worker back to the phone step keeps `mode` intact, so verifying
+ * drops them back on the screen they were on (see `OtpStep`) instead of
+ * stranding them with a clocked-in visit they cannot close.
+ */
+function VerifyAgainNotice({ action }: { action: string }) {
+  const flow = useWorkerFlow();
+  return (
+    <>
+      <p className="sg-error">
+        This device is not verified for this visit any more. Verify your phone again to
+        {action} — you will come straight back here.
+      </p>
+      <Button
+        variant="primary"
+        block
+        onClick={() => {
+          clearWorkerSession();
+          flow.set({ step: "phone" });
+        }}
+      >
+        <ShieldAlert size={14} /> Verify phone
+      </Button>
+    </>
+  );
 }
 
 async function loadWorkerRequests(opts: {
@@ -439,7 +494,15 @@ function OtpStep() {
       if (activePending) {
         flow.set({ worker, request: activePending, mode: "waiting", step: "waiting" });
       } else if (openVisit) {
-        flow.set({ worker, request: openVisit, mode: "visit", step: "visit" });
+        // A worker who was part-way through signing out and had to re-verify
+        // goes back to the sign-out screen, not to the start of the visit.
+        const signingOut = flow.mode === "clockout";
+        flow.set({
+          worker,
+          request: openVisit,
+          mode: signingOut ? "clockout" : "visit",
+          step: signingOut ? "clockout" : "visit",
+        });
       } else {
         flow.set({ worker, request: null, mode: "request", step: "form" });
       }
@@ -1085,7 +1148,7 @@ function WaitingStep() {
       }
     }
     void poll();
-    const id = window.setInterval(() => void poll(), 10_000);
+    const id = window.setInterval(() => void poll(), 10000);
     return () => {
       stop = true;
       window.clearInterval(id);
@@ -1132,6 +1195,7 @@ function VisitStep() {
   const flow = useWorkerFlow();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [session, refreshSession] = useWorkerSession();
   const clockedIn = Boolean(flow.request?.clockedInAt);
   const expected = flow.request?.expectedClockOutAt;
 
@@ -1157,14 +1221,23 @@ function VisitStep() {
       return;
     }
     const workerId = flow.request.workerId || flow.worker?.id || 0;
-    const session = readWorkerSession();
+    // Check the verification here rather than letting the call go out anyway:
+    // `updateAccessRequest` accepts a tokenless clock-in, which would hide a
+    // lapsed session until the worker tried to sign out at the end of the
+    // shift — which is where this used to fail.
+    const current = refreshSession();
+    if (!current) {
+      setError("");
+      return;
+    }
+    const token = current.token?.trim() || "";
     setBusy(true);
     setError("");
     try {
       const now = new Date();
       const expectedOut =
         flow.request.expectedClockOutAt || new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString();
-      await api.updateAccessRequest(session?.token, {
+      await api.updateAccessRequest(token, {
         id: flow.request.id,
         workerId,
         roomId: flow.request.roomId,
@@ -1176,14 +1249,12 @@ function VisitStep() {
         expectedClockOutAt: expectedOut.slice(0, 19),
       });
       try {
-        if (session?.token) {
-          await api.insertAudit(session.token, {
-            accessRequestId: flow.request.id,
-            workerId,
-            eventType: "ClockedIn",
-            description: `${flow.worker?.firstName ?? "Worker"} ${flow.worker?.lastName ?? ""} clocked in at ${locationDisplay(flow.room)}.`,
-          });
-        }
+        await api.insertAudit(token, {
+          accessRequestId: flow.request.id,
+          workerId,
+          eventType: "ClockedIn",
+          description: `${flow.worker?.firstName ?? "Worker"} ${flow.worker?.lastName ?? ""} clocked in at ${locationDisplay(flow.room)}.`,
+        });
       } catch {
         /* audit is best-effort */
       }
@@ -1224,12 +1295,18 @@ function VisitStep() {
       ) : null}
       {expected ? <p className="sg-help">Expected clock out {whenExact(expected)}</p> : null}
       {error ? <p className="sg-error">{error}</p> : null}
-      <Button variant="primary" block disabled={busy || clockedIn} onClick={() => void clockIn()}>
+      {session ? null : <VerifyAgainNotice action={clockedIn ? "sign out" : "clock in"} />}
+      <Button
+        variant="primary"
+        block
+        disabled={busy || clockedIn || !session}
+        onClick={() => void clockIn()}
+      >
         {busy ? "Clocking in…" : clockedIn ? "Already clocked in" : "Clock in"}
       </Button>
       <Button
         block
-        disabled={busy}
+        disabled={busy || !session}
         onClick={() => flow.set({ mode: "clockout", step: "clockout" })}
       >
         Sign out
@@ -1247,6 +1324,7 @@ function ClockOutStep() {
   const [photoType, setPhotoType] = useState(PHOTO_TYPES[0]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [session, refreshSession] = useWorkerSession();
 
   async function finish() {
     if (!flow.request) return;
@@ -1255,16 +1333,19 @@ function ClockOutStep() {
       return;
     }
     const workerId = flow.request.workerId || flow.worker?.id || 0;
-    const token = (readWorkerSession()?.token || readSession()?.token || "").trim();
-    if (!token) {
-      setError("Your session expired. Verify your phone again, then sign out.");
+    // Re-read rather than trusting the render-time value: the session can
+    // lapse while this screen is open waiting for a photo.
+    const current = refreshSession();
+    if (!current) {
+      setError("");
       return;
     }
+    const freshToken = current.token?.trim() || "";
     setBusy(true);
     setError("");
     try {
       for (const photo of photos) {
-        await api.insertPhoto(token, {
+        await api.insertPhoto(freshToken, {
           accessRequestId: flow.request.id,
           photoType,
           uploadedByWorkerId: workerId,
@@ -1273,7 +1354,7 @@ function ClockOutStep() {
         });
       }
       const now = new Date().toISOString();
-      await api.updateAccessRequest(token, {
+      await api.updateAccessRequest(freshToken, {
         id: flow.request.id,
         workerId,
         roomId: flow.request.roomId,
@@ -1285,14 +1366,12 @@ function ClockOutStep() {
         completedAt: now.slice(0, 19),
       });
       try {
-        if (token) {
-          await api.insertAudit(token, {
-            accessRequestId: flow.request.id,
-            workerId,
-            eventType: "ClockedOut",
-            description: `${flow.worker?.firstName ?? "Worker"} ${flow.worker?.lastName ?? ""} clocked out of ${locationDisplay(flow.room)}.`,
-          });
-        }
+        await api.insertAudit(freshToken, {
+          accessRequestId: flow.request.id,
+          workerId,
+          eventType: "ClockedOut",
+          description: `${flow.worker?.firstName ?? "Worker"} ${flow.worker?.lastName ?? ""} clocked out of ${locationDisplay(flow.room)}.`,
+        });
       } catch {
         /* audit is best-effort */
       }
@@ -1341,7 +1420,8 @@ function ClockOutStep() {
         }}
       />
       {error ? <p className="sg-error">{error}</p> : null}
-      <Button variant="primary" block disabled={busy} onClick={() => void finish()}>
+      {session ? null : <VerifyAgainNotice action="sign out" />}
+      <Button variant="primary" block disabled={busy || !session} onClick={() => void finish()}>
         {busy ? "Signing out…" : "Sign out"}
       </Button>
       <Button type="button" onClick={() => flow.set({ step: "visit", mode: "visit" })}>
