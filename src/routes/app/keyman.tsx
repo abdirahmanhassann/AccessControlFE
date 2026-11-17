@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
-import { Check, KeyRound, X } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Check, Download, KeyRound, X } from "lucide-react";
 import { Badge, Button, Field, PageSkeleton, Textarea, toast } from "@/components/ui";
 import { readSession } from "@/lib/session";
 import {
@@ -22,6 +22,67 @@ import { ApiError, type AccessPhoto, type RoomLeaveReview, type Session } from "
 export const Route = createFileRoute("/app/keyman")({ component: KeymanPage });
 
 const POLL_MS = 30_000;
+
+/**
+ * The page is one table of everything a Keyman deals with, and the cards along
+ * the top choose which slice of it is on screen. Room checks are what the job
+ * is about, so that is where it opens.
+ */
+const FILTERS = [
+  {
+    key: "checks",
+    label: "Rooms to check",
+    hint: "Oldest first. Each one waits for a Keyman before the visit is fully closed.",
+    empty: "No rooms waiting. You will see one here as soon as a worker signs out.",
+  },
+  {
+    key: "active",
+    label: "Active requests",
+    hint: "Approved visits the worker has not signed out of yet, with their time frame.",
+    empty: "No approved visits are open.",
+  },
+  {
+    key: "onsite",
+    label: "On site now",
+    hint: "Approved visits where the worker has clocked in and not left.",
+    empty: "Nobody is clocked in right now.",
+  },
+  {
+    key: "rejected",
+    label: "Rejected room leaves",
+    hint: "Room checks sent back to the worker, with the reason given.",
+    empty: "No room leave has been rejected.",
+  },
+  {
+    key: "all",
+    label: "All",
+    hint: "Every room check and open visit, newest activity first within each group.",
+    empty: "Nothing to show yet.",
+  },
+] as const;
+
+type FilterKey = (typeof FILTERS)[number]["key"];
+
+/**
+ * One shape for the three things the table mixes: a room check waiting for a
+ * decision, an open visit, and a check that has already been signed off.
+ */
+type KeymanRow = {
+  key: string;
+  kind: "check" | "visit" | "decided";
+  onSite: boolean;
+  accessRequestId: number;
+  worker: string;
+  company: string;
+  location: string;
+  workType: string;
+  start: string | null;
+  end: string | null;
+  status: string;
+  at: string | null;
+  reason: string;
+  review: RoomLeaveReview | null;
+};
 
 /** Room checks and photos, polled so a sign-out shows up without a refresh. */
 function useRoomLeaveReviews(token: string | undefined) {
@@ -59,6 +120,166 @@ function useRoomLeaveReviews(token: string | undefined) {
   return { reviews, photos, error, loaded, reload };
 }
 
+function companyFor(data: StaffData, workerId: number) {
+  return data.workers.find((w) => w.id === workerId)?.companyName ?? "";
+}
+
+function buildRows(data: StaffData, reviews: RoomLeaveReview[]): KeymanRow[] {
+  const checks = reviews
+    .filter((r) => r.status === "Pending")
+    // Oldest first: the room that has been waiting longest is the one to do next.
+    .sort((a, b) => String(a.requestedAt ?? "").localeCompare(String(b.requestedAt ?? "")))
+    .map<KeymanRow>((r) => ({
+      key: `check-${r.id}`,
+      kind: "check",
+      onSite: false,
+      accessRequestId: r.accessRequestId,
+      worker: reviewWorker(r, data),
+      company: r.companyName ?? "",
+      location: reviewRoom(r, data),
+      workType: r.workType ?? "",
+      start: r.workFrom || r.clockedInAt || null,
+      end: r.workTo ?? null,
+      status: "Waiting",
+      at: r.clockedOutAt || r.requestedAt,
+      reason: "",
+      review: r,
+    }));
+
+  const visits = activeRequests(data).map<KeymanRow>((r) => {
+    const span = visitSpan(r);
+    const onSite = Boolean(r.clockedInAt);
+    const derived = displayStatus(r, data.approvals);
+    return {
+      key: `visit-${r.id}`,
+      kind: "visit",
+      onSite,
+      accessRequestId: r.id,
+      worker: workerLabel(data, r.workerId, r),
+      company: companyFor(data, r.workerId),
+      location: r.locationLabel || roomLabel(data, r.roomId),
+      workType: r.workType ?? "",
+      start: span.start,
+      end: span.end,
+      status: onSite && derived === "Active" ? "On site" : derived,
+      at: r.clockedInAt,
+      reason: "",
+      review: null,
+    };
+  });
+
+  const decided = reviews
+    .filter((r) => r.status !== "Pending")
+    .sort((a, b) => String(b.reviewedAt ?? "").localeCompare(String(a.reviewedAt ?? "")))
+    .map<KeymanRow>((r) => ({
+      key: `decided-${r.id}`,
+      kind: "decided",
+      onSite: false,
+      accessRequestId: r.accessRequestId,
+      worker: reviewWorker(r, data),
+      company: r.companyName ?? "",
+      location: reviewRoom(r, data),
+      workType: r.workType ?? "",
+      start: r.workFrom || r.clockedInAt || null,
+      end: r.workTo ?? null,
+      status: r.status === "Approved" ? "Room OK" : "Rejected",
+      at: r.reviewedAt,
+      reason: r.status === "Approved" ? "" : (r.reason ?? ""),
+      review: r,
+    }));
+
+  return [...checks, ...visits, ...decided];
+}
+
+function matches(row: KeymanRow, filter: FilterKey) {
+  switch (filter) {
+    case "checks":
+      return row.kind === "check";
+    case "active":
+      return row.kind === "visit";
+    case "onsite":
+      return row.kind === "visit" && row.onSite;
+    case "rejected":
+      return row.kind === "decided" && row.status === "Rejected";
+    case "all":
+      return true;
+  }
+}
+
+function toneFor(row: KeymanRow) {
+  if (row.kind === "check") return "warn" as const;
+  if (row.status === "Room OK") return "ok" as const;
+  if (row.status === "Rejected") return "danger" as const;
+  return statusTone(row.status);
+}
+
+const CSV_COLUMNS = [
+  "Category",
+  "Worker",
+  "Company",
+  "Location",
+  "Work type",
+  "Start",
+  "End",
+  "Status",
+  "Updated",
+  "Reason",
+];
+
+const CATEGORY: Record<KeymanRow["kind"], string> = {
+  check: "Room to check",
+  visit: "Active request",
+  decided: "Checked",
+};
+
+/**
+ * Excel reads a cell beginning with =, +, - or @ as a formula, and the reason
+ * field is free text a worker's manager typed, so those get an apostrophe in
+ * front of them.
+ */
+function csvCell(value: string) {
+  const text = value ?? "";
+  const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  return `"${safe.replace(/"/g, '""')}"`;
+}
+
+function rowsToCsv(rows: KeymanRow[]) {
+  const lines = [CSV_COLUMNS.map(csvCell).join(",")];
+  for (const row of rows) {
+    lines.push(
+      [
+        CATEGORY[row.kind],
+        row.worker,
+        row.company,
+        row.location,
+        row.workType,
+        row.start ? whenExact(row.start) : "",
+        row.end ? whenExact(row.end) : "",
+        row.status,
+        row.at ? whenExact(row.at) : "",
+        row.reason,
+      ]
+        .map(csvCell)
+        .join(","),
+    );
+  }
+  return lines.join("\r\n");
+}
+
+function downloadCsv(filename: string, csv: string) {
+  // The BOM is what makes Excel open this as UTF-8 instead of the machine's
+  // own code page, which would mangle any accented name.
+  const blob = new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 function KeymanPage() {
   const mounted = useMounted();
   const [session, setSession] = useState<Session | null>(null);
@@ -66,14 +287,27 @@ function KeymanPage() {
   const token = session?.token;
   const { data, error, loading } = useStaffData(token, { pollRequests: true });
   const checks = useRoomLeaveReviews(token);
+  const [filter, setFilter] = useState<FilterKey>("checks");
+  const [openKey, setOpenKey] = useState<string | null>(null);
+
+  const rows = useMemo(() => (data ? buildRows(data, checks.reviews) : []), [data, checks.reviews]);
+  const shown = useMemo(() => rows.filter((r) => matches(r, filter)), [rows, filter]);
+  const counts = useMemo(
+    () =>
+      FILTERS.reduce<Record<FilterKey, number>>(
+        (acc, f) => {
+          acc[f.key] = rows.filter((r) => matches(r, f.key)).length;
+          return acc;
+        },
+        { checks: 0, active: 0, onsite: 0, rejected: 0, all: 0 },
+      ),
+    [rows],
+  );
 
   if (!mounted || loading || !data || !checks.loaded) return <PageSkeleton />;
 
   const canReview = canReviewRoomLeave(session?.user.role);
-  const pending = checks.reviews.filter((r) => r.status === "Pending");
-  const decided = checks.reviews.filter((r) => r.status !== "Pending").slice(0, 15);
-  const active = activeRequests(data);
-  const onSite = active.filter((r) => r.clockedInAt);
+  const current = FILTERS.find((f) => f.key === filter) ?? FILTERS[0];
 
   return (
     <div className="sg-content">
@@ -85,58 +319,48 @@ function KeymanPage() {
       </p>
 
       <div className="sg-stats">
-        <div className="sg-stat">
-          <span>Rooms to check</span>
-          <div className="n">{pending.length}</div>
-        </div>
-        <div className="sg-stat">
-          <span>Active requests</span>
-          <div className="n">{active.length}</div>
-        </div>
-        <div className="sg-stat">
-          <span>On site now</span>
-          <div className="n">{onSite.length}</div>
-        </div>
-        <div className="sg-stat">
-          <span>Rejected room leaves</span>
-          <div className="n">{checks.reviews.filter((r) => r.status === "Rejected").length}</div>
-        </div>
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            className={`sg-stat sg-stat-filter${filter === f.key ? " is-on" : ""}`}
+            aria-pressed={filter === f.key}
+            onClick={() => {
+              setFilter(f.key);
+              setOpenKey(null);
+            }}
+          >
+            <span>{f.label}</span>
+            <div className="n">{counts[f.key]}</div>
+          </button>
+        ))}
       </div>
 
       <section className="sg-card" style={{ display: "grid", gap: 14 }}>
-        <div>
-          <h2>Rooms to check</h2>
-          <p className="sg-muted">Oldest first. Each one waits for a Keyman before the visit is fully closed.</p>
+        <div className="sg-section-head">
+          <div>
+            <h2>{current.label}</h2>
+            <p className="sg-muted">{current.hint}</p>
+          </div>
+          <Button
+            disabled={shown.length === 0}
+            onClick={() =>
+              downloadCsv(
+                `keyman-${filter}-${new Date().toISOString().slice(0, 10)}.csv`,
+                rowsToCsv(shown),
+              )
+            }
+          >
+            <Download size={14} /> Export CSV
+          </Button>
         </div>
+
         {!canReview ? (
           <p className="sg-help">You can see room checks, but only a Keyman or an Admin can sign them off.</p>
         ) : null}
-        {pending.length === 0 ? (
-          <p className="sg-muted">No rooms waiting. You will see one here as soon as a worker signs out.</p>
-        ) : (
-          <div className="sg-list">
-            {pending.map((review) => (
-              <ReviewCard
-                key={review.id}
-                review={review}
-                data={data}
-                photos={checks.photos.filter((p) => p.accessRequestId === review.accessRequestId)}
-                canReview={canReview}
-                token={token ?? ""}
-                onDone={() => void checks.reload()}
-              />
-            ))}
-          </div>
-        )}
-      </section>
 
-      <section className="sg-card" style={{ display: "grid", gap: 14 }}>
-        <div>
-          <h2>Active requests</h2>
-          <p className="sg-muted">Approved visits the worker has not signed out of yet, with their time frame.</p>
-        </div>
-        {active.length === 0 ? (
-          <p className="sg-muted">No approved visits are open.</p>
+        {shown.length === 0 ? (
+          <p className="sg-muted">{current.empty}</p>
         ) : (
           <div className="sg-table-wrap">
             <table className="sg-table">
@@ -146,65 +370,69 @@ function KeymanPage() {
                   <th>Location</th>
                   <th>Start – end</th>
                   <th>Status</th>
+                  <th>Updated</th>
+                  <th />
                 </tr>
               </thead>
               <tbody>
-                {active.map((r) => {
-                  const span = visitSpan(r);
-                  const status = r.clockedInAt && displayStatus(r, data.approvals) === "Active"
-                    ? "On site"
-                    : displayStatus(r, data.approvals);
+                {shown.map((row) => {
+                  const open = openKey === row.key;
                   return (
-                    <tr key={r.id}>
-                      <td>
-                        <Link to="/app/requests/$id" params={{ id: String(r.id) }}>
-                          {workerLabel(data, r.workerId, r)}
-                        </Link>
-                        {r.workType ? <div className="sg-muted">{r.workType}</div> : null}
-                      </td>
-                      <td>{r.locationLabel || roomLabel(data, r.roomId)}</td>
-                      <td className="sg-mono">{timeRange(span.start, span.end)}</td>
-                      <td>
-                        <Badge tone={statusTone(status)}>{status}</Badge>
-                      </td>
-                    </tr>
+                    <Fragment key={row.key}>
+                      <tr>
+                        <td>
+                          <Link to="/app/requests/$id" params={{ id: String(row.accessRequestId) }}>
+                            {row.worker}
+                          </Link>
+                          {row.company || row.workType ? (
+                            <div className="sg-muted">
+                              {[row.company, row.workType].filter(Boolean).join(" · ")}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td>{row.location}</td>
+                        <td className="sg-mono">{timeRange(row.start, row.end)}</td>
+                        <td>
+                          <Badge tone={toneFor(row)}>{row.status}</Badge>
+                          {row.reason ? (
+                            <div className="sg-error" style={{ marginTop: 4 }}>
+                              {row.reason}
+                            </div>
+                          ) : null}
+                        </td>
+                        <td>{row.at ? when(row.at) : "—"}</td>
+                        <td>
+                          {row.kind === "check" ? (
+                            <Button size="sm" onClick={() => setOpenKey(open ? null : row.key)}>
+                              <KeyRound size={13} /> {open ? "Close" : "Check room"}
+                            </Button>
+                          ) : null}
+                        </td>
+                      </tr>
+                      {open && row.review ? (
+                        <tr>
+                          <td colSpan={6} className="sg-row-detail">
+                            <ReviewCard
+                              review={row.review}
+                              data={data}
+                              photos={checks.photos.filter(
+                                (p) => p.accessRequestId === row.accessRequestId,
+                              )}
+                              canReview={canReview}
+                              token={token ?? ""}
+                              onDone={() => {
+                                setOpenKey(null);
+                                void checks.reload();
+                              }}
+                            />
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
                   );
                 })}
               </tbody>
             </table>
-          </div>
-        )}
-      </section>
-
-      <section className="sg-card" style={{ display: "grid", gap: 14 }}>
-        <h2>Recently checked</h2>
-        {decided.length === 0 ? (
-          <p className="sg-muted">Nothing signed off yet.</p>
-        ) : (
-          <div className="sg-list">
-            {decided.map((r) => (
-              <Link
-                key={r.id}
-                to="/app/requests/$id"
-                params={{ id: String(r.accessRequestId) }}
-                className="sg-list-item"
-              >
-                <div>
-                  <strong>{reviewWorker(r, data)}</strong>
-                  <div className="sg-muted">
-                    {reviewRoom(r, data)} · {reviewerName(r)} · {when(r.reviewedAt)}
-                  </div>
-                  {r.status === "Rejected" && r.reason ? (
-                    <div className="sg-error" style={{ marginTop: 4 }}>
-                      {r.reason}
-                    </div>
-                  ) : null}
-                </div>
-                <Badge tone={r.status === "Approved" ? "ok" : "danger"}>
-                  {r.status === "Approved" ? "Room OK" : "Rejected"}
-                </Badge>
-              </Link>
-            ))}
           </div>
         )}
       </section>
@@ -223,10 +451,6 @@ function reviewRoom(r: RoomLeaveReview, data: StaffData) {
     .filter(Boolean)
     .join(" ");
   return [room || `Location #${r.roomId}`, r.workAreaName, r.siteName].filter(Boolean).join(" · ");
-}
-
-function reviewerName(r: RoomLeaveReview) {
-  return [r.reviewerFirstName, r.reviewerLastName].filter(Boolean).join(" ").trim() || "Keyman";
 }
 
 function ReviewCard({
@@ -269,7 +493,7 @@ function ReviewCard({
   }
 
   return (
-    <article className="sg-card" style={{ display: "grid", gap: 12, boxShadow: "none" }}>
+    <article style={{ display: "grid", gap: 12 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
         <div>
           <p className="sg-kicker">

@@ -905,6 +905,42 @@
   letter-spacing: var(--tracking-display);
   font-variant-numeric: tabular-nums;
 }
+.sg-stat-filter {
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-quick) var(--ease-out),
+    background-color var(--motion-quick) var(--ease-out);
+}
+.sg-stat-filter:hover {
+  border-color: var(--line-strong);
+}
+.sg-stat-filter.is-on {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.sg-stat-filter.is-on span {
+  color: var(--accent-2);
+}
+.sg-stat-filter:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.sg-section-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: start;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+/* The panel a room check opens into, inside the table it belongs to. */
+.sg-row-detail {
+  background: var(--bg-elevated);
+  padding: 16px 14px;
+  cursor: auto;
+}
 .sg-stat span {
   color: var(--ink-muted);
   font-size: var(--text-sm);
