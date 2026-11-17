@@ -22,9 +22,10 @@ function HoursPage() {
   return (
     <div className="sg-content">
       {error ? <p className="sg-error">{error}</p> : null}
+      <p className="sg-muted">Workers can't submit access requests for a work area during its blackout hours.</p>
       <div className="sg-toolbar">
         <Button variant="primary" onClick={() => setEdit("new")}>
-          Add window
+          Add blackout hours
         </Button>
       </div>
       <div className="sg-table-wrap">
@@ -81,7 +82,7 @@ function HoursPage() {
             } else {
               await api.updateAccessWindow(t, { ...(edit as AccessWindow), ...values } as AccessWindow);
             }
-            toast("Access window saved");
+            toast("Blackout hours saved");
             setEdit(null);
             await reload();
           }}
@@ -105,7 +106,7 @@ function WindowForm({
   const [v, setV] = useState(initial);
   const [busy, setBusy] = useState(false);
   return (
-    <Modal title={initial.id ? "Edit window" : "New window"} onClose={onClose}>
+    <Modal title={initial.id ? "Edit blackout hours" : "New blackout hours"} onClose={onClose}>
       <Field label="Work area">
         <Select
           value={String(v.workAreaId ?? "")}

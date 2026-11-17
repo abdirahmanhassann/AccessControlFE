@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Button, Field, Input, PageSkeleton, Select, toast } from "@/components/ui";
 import { readSession } from "@/lib/session";
-import { useStaffData } from "@/lib/staff-data";
+import { isManagerRole, useStaffData } from "@/lib/staff-data";
 import { useMounted } from "@/lib/use-mounted";
 import { api } from "@/lib/api/client";
 import type {
@@ -237,7 +237,7 @@ function DepartmentsPage() {
             options={data.users
               .filter(
                 (u) =>
-                  /manager|admin/i.test(String(u.role)) &&
+                  isManagerRole(u.role) &&
                   !managers.some((m) => m.userId === u.id),
               )
               .map((u) => ({ id: u.id, label: `${u.firstName} ${u.lastName} · ${u.role}` }))}

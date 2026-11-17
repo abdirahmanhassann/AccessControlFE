@@ -1,4 +1,5 @@
 import { ApiError } from "./types";
+import { localStamp } from "@/lib/visit-window";
 import {
   asArray,
   isPlainObject,
@@ -11,6 +12,7 @@ import {
 import {
   asApproval,
   asAudit,
+  asRoomLeaveReview,
   asWorkerRow,
   coerceRow,
 } from "./client-mappers";
@@ -27,6 +29,7 @@ import type {
   AuditEvent,
   Notification,
   OTPVerification,
+  RoomLeaveReview,
 } from "./types";
 
 export type InsertPhotoInput = {
@@ -107,7 +110,7 @@ export const apiPart2 = {
     if (!accessRequestId) {
       throw new ApiError(400, "AccessRequestId is required.");
     }
-    const reviewedAt = data.reviewedAt ?? new Date().toISOString().slice(0, 19);
+    const reviewedAt = data.reviewedAt ?? localStamp();
     const approved = /^approved$/i.test(data.status);
     const rejected = /^rejected$/i.test(data.status);
     const payload: Record<string, unknown> = {
@@ -214,6 +217,31 @@ export const apiPart2 = {
     post<Notification | null>("/Access/insertnotification", { token, ...data }),
   updateNotification: (token: string, data: Partial<Notification> & { id: number }) =>
     post<Notification | null>("/Access/updatenotification", { token, ...data }),
+
+  /** Keyman room checks. `status` narrows to Pending / Approved / Rejected. */
+  getRoomLeaveReviews: async (
+    token: string,
+    filter?: { id?: number; accessRequestId?: number; status?: string },
+  ): Promise<RoomLeaveReview[]> =>
+    asArray<unknown>(
+      await post(
+        "/Access/getroomleavereviews",
+        dual({
+          token,
+          id: filter?.id ?? 0,
+          accessRequestId: filter?.accessRequestId ?? 0,
+          status: filter?.status ?? "",
+        }),
+      ),
+    )
+      .map(asRoomLeaveReview)
+      .filter((r) => r.id),
+  /** Keyman decision on a room leave. A reason is required to reject. */
+  reviewRoomLeave: (token: string, data: { id: number; status: "Approved" | "Rejected"; reason?: string }) =>
+    post<unknown>(
+      "/Access/reviewroomleave",
+      dual({ token, id: data.id, status: data.status, reason: data.reason ?? "" }),
+    ),
 
   getAudits: async (token: string) =>
     asArray<unknown>(await post("/Access/getauditevents", { token }))

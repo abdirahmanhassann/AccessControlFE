@@ -137,7 +137,7 @@ export const apiPart1a = {
       }),
     )
       .map(asUserRow)
-      .filter((u) => /manager|admin/i.test(String(u.role)));
+      .filter((u) => /manager|admin|keyman/i.test(String(u.role)));
   },
   insertUser: (token: string, data: Partial<User> & { password?: string }) =>
     post("/Access/insertuser", dual({ token, ...data })),

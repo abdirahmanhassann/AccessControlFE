@@ -11,6 +11,7 @@ import {
   type Notification,
   type OTPVerification,
   type Room,
+  type RoomLeaveReview,
   type RoomManager,
   type ScanQrResult,
   type Session,
@@ -43,6 +44,8 @@ type Db = {
   otps: OTPVerification[];
   notifications: Notification[];
   audits: AuditEvent[];
+  /** Optional so demo data saved by an earlier build still loads. */
+  roomLeaveReviews?: RoomLeaveReview[];
   sessions: Session[];
   seq: Record<string, number>;
 };
@@ -106,6 +109,16 @@ function seed(): Db {
       role: "Manager",
       isActive: true,
       createdAt: hoursAgo(140),
+    },
+    {
+      id: 6,
+      firstName: "Tom",
+      lastName: "Reyes",
+      email: "tom.reyes@sitegate.demo",
+      phoneNumber: "07700900006",
+      role: "Keyman",
+      isActive: true,
+      createdAt: hoursAgo(120),
     },
   ];
 
@@ -579,6 +592,7 @@ function seed(): Db {
       "3": "SiteGate1!",
       "4": "SiteGate1!",
       "5": "SiteGate1!",
+      "6": "SiteGate1!",
     },
     sites,
     workAreas,
@@ -596,9 +610,10 @@ function seed(): Db {
     otps: [],
     notifications,
     audits,
+    roomLeaveReviews: [],
     sessions: [],
     seq: {
-      users: 6,
+      users: 7,
       sites: 3,
       workAreas: 4,
       rooms: 13,
@@ -639,6 +654,7 @@ function emptyDb(): Db {
     otps: [],
     notifications: [],
     audits: [],
+    roomLeaveReviews: [],
     sessions: [],
     seq: {},
   };
@@ -872,6 +888,78 @@ function expectedOutIso() {
   const d = new Date();
   d.setHours(d.getHours() + 8);
   return d.toISOString();
+}
+
+/** Joined room-leave row, shaped like the API's RoomLeaveReviewsGet. */
+function roomLeaveRow(review: RoomLeaveReview): RoomLeaveReview {
+  const db = load();
+  const req = db.requests.find((r) => r.id === review.accessRequestId);
+  const worker = req ? db.workers.find((w) => w.id === req.workerId) : undefined;
+  const room = req ? db.rooms.find((r) => r.id === req.roomId) : undefined;
+  const area = room ? db.workAreas.find((a) => a.id === room.workAreaId) : undefined;
+  const site = area ? db.sites.find((x) => x.id === area.siteId) : undefined;
+  const reviewer = review.reviewedByUserId ? db.users.find((u) => u.id === review.reviewedByUserId) : undefined;
+  return {
+    ...review,
+    reviewerFirstName: reviewer?.firstName,
+    reviewerLastName: reviewer?.lastName,
+    workerId: req?.workerId ?? 0,
+    workerFirstName: worker?.firstName,
+    workerLastName: worker?.lastName,
+    workerPhoneNumber: worker?.phoneNumber,
+    companyName: worker?.companyName,
+    roomId: req?.roomId ?? 0,
+    roomNumber: room?.roomNumber,
+    roomName: room ? locationDisplay(room) : undefined,
+    workAreaName: area?.name,
+    siteName: site?.name,
+    workType: req?.workType,
+    workFrom: req?.workFrom ?? null,
+    workTo: req?.workTo ?? null,
+    clockedInAt: req?.clockedInAt ?? null,
+    clockedOutAt: req?.clockedOutAt ?? null,
+    photoCount: db.photos.filter((p) => p.accessRequestId === review.accessRequestId).length,
+  };
+}
+
+/** Mirrors the API: one review per visit, opened when it is signed out, Keyman pinged once. */
+function openRoomLeaveReview(req: AccessRequest) {
+  const db = load();
+  db.roomLeaveReviews ??= [];
+  if (db.roomLeaveReviews.some((r) => r.accessRequestId === req.id)) return;
+  db.roomLeaveReviews.push({
+    id: nextId(db, "roomLeaveReviews"),
+    accessRequestId: req.id,
+    status: "Pending",
+    reason: "",
+    requestedAt: iso(),
+    reviewedAt: null,
+    reviewedByUserId: null,
+    workerId: req.workerId,
+    roomId: req.roomId,
+    photoCount: 0,
+  });
+  const room = db.rooms.find((r) => r.id === req.roomId);
+  const worker = db.workers.find((w) => w.id === req.workerId);
+  const message = `${worker ? `${worker.firstName} ${worker.lastName}` : "A worker"} has left ${room ? locationDisplay(room) : "the room"}. Check the room and approve or reject the room leave.`;
+  audit({
+    accessRequestId: req.id,
+    workerId: req.workerId,
+    userId: null,
+    eventType: "RoomLeaveRequested",
+    description: message,
+    metadata: "{}",
+  });
+  for (const keyman of db.users.filter((u) => u.isActive && /^keyman$/i.test(String(u.role)))) {
+    notify({
+      userId: keyman.id,
+      workerId: null,
+      accessRequestId: req.id,
+      type: "RoomLeaveReview",
+      channel: "IN_APP",
+      message,
+    });
+  }
 }
 
 type Body = Record<string, unknown>;
@@ -1577,8 +1665,78 @@ const handlers: Record<string, (body: Body) => unknown> = {
     }
     if ("clockedOutAt" in body) req.clockedOutAt = (body.clockedOutAt as string) || null;
     if ("completedAt" in body) req.completedAt = (body.completedAt as string) || null;
+    if (body.clockedOutAt || body.completedAt) openRoomLeaveReview(req);
     persist();
     return req;
+  },
+
+  "/Access/getroomleavereviews": (body) => {
+    requireStaff(body as { token?: string });
+    const db = load();
+    const id = Number(body.id ?? body.Id ?? 0);
+    const accessRequestId = Number(body.accessRequestId ?? body.AccessRequestId ?? 0);
+    const status = String(body.status ?? body.Status ?? "").toLowerCase();
+    return (db.roomLeaveReviews ?? [])
+      .filter((r) => !id || r.id === id)
+      .filter((r) => !accessRequestId || r.accessRequestId === accessRequestId)
+      .filter((r) => !status || status === "all" || String(r.status).toLowerCase() === status)
+      .map(roomLeaveRow)
+      .sort((a, b) => {
+        const pa = a.status === "Pending" ? 0 : 1;
+        const pb = b.status === "Pending" ? 0 : 1;
+        if (pa !== pb) return pa - pb;
+        return pa === 0
+          ? a.requestedAt.localeCompare(b.requestedAt)
+          : String(b.reviewedAt).localeCompare(String(a.reviewedAt));
+      });
+  },
+
+  "/Access/reviewroomleave": (body) => {
+    const session = requireStaff(body as { token?: string });
+    const db = load();
+    const user = db.users.find((u) => u.id === session.user.id) ?? session.user;
+    if (!/^(keyman|admin)$/i.test(String(user.role))) {
+      throw new ApiError(403, "Only a Keyman can sign off a room.");
+    }
+    const review = (db.roomLeaveReviews ?? []).find((r) => r.id === Number(body.id ?? body.Id));
+    if (!review) throw new ApiError(404, "That room check no longer exists.");
+    const raw = String(body.status ?? body.Status ?? "").toLowerCase();
+    const status = raw.startsWith("approve") ? "Approved" : raw.startsWith("reject") ? "Rejected" : "";
+    if (!status) throw new ApiError(400, "Choose approve or reject.");
+    const reason = String(body.reason ?? body.Reason ?? "").trim();
+    if (status === "Rejected" && !reason) throw new ApiError(400, "Give a reason for rejecting the room leave.");
+    if (review.status !== "Pending") throw new ApiError(409, "This room has already been checked.");
+    review.status = status;
+    review.reason = reason;
+    review.reviewedAt = iso();
+    review.reviewedByUserId = user.id;
+    const row = roomLeaveRow(review);
+    const where = row.roomName || "the room";
+    audit({
+      accessRequestId: review.accessRequestId,
+      workerId: row.workerId || null,
+      userId: user.id,
+      eventType: status === "Approved" ? "RoomLeaveApproved" : "RoomLeaveRejected",
+      description:
+        status === "Approved"
+          ? `Keyman ${user.firstName} ${user.lastName} checked ${where} and approved the room leave.`
+          : `Keyman ${user.firstName} ${user.lastName} rejected the room leave for ${where}. Reason: ${reason}`,
+      metadata: "{}",
+    });
+    if (status === "Rejected") {
+      for (const a of db.approvals.filter((x) => x.accessRequestId === review.accessRequestId)) {
+        notify({
+          userId: a.approverUserId,
+          workerId: null,
+          accessRequestId: review.accessRequestId,
+          type: "RoomLeaveRejected",
+          channel: "IN_APP",
+          message: `Keyman ${user.firstName} ${user.lastName} rejected the room leave for ${where}. Reason: ${reason}`,
+        });
+      }
+    }
+    persist();
+    return null;
   },
 
   "/Access/getaccessrequestapprovals": (body) => {

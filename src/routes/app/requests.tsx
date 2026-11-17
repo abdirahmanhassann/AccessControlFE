@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Badge, Button, Input, PageSkeleton, Select } from "@/components/ui";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { readSession } from "@/lib/session";
-import { latestApproval, roomLabel, useStaffData, workerLabel, effectiveStatus } from "@/lib/staff-data";
+import { latestApproval, roomLabel, useStaffData, workerLabel, displayStatus, DERIVED_STATUSES } from "@/lib/staff-data";
 import { statusTone, when } from "@/lib/format";
 import { useMounted } from "@/lib/use-mounted";
 import { api } from "@/lib/api/client";
@@ -38,17 +38,25 @@ function RequestsPage() {
   useEffect(() => {
     if (!token) return;
     let cancelled = false;
+    // Upcoming / Active / Overdue are worked out from Approved rows, so fetch those and filter here.
+    const derived = DERIVED_STATUSES.includes(status);
     void api
       .getAccessRequests(token, {
-        status: status === "all" ? undefined : status,
+        status: status === "all" ? undefined : derived ? "Approved" : status,
         search: search || undefined,
-        skip: page * PAGE_SIZE,
-        take: PAGE_SIZE,
+        skip: derived ? 0 : page * PAGE_SIZE,
+        take: derived ? 500 : PAGE_SIZE,
       })
       .then((list) => {
         if (cancelled) return;
-        setRows(list);
-        setTotal(list.total);
+        if (derived) {
+          const matching = list.filter((r) => displayStatus(r, data?.approvals ?? []) === status);
+          setRows(matching.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE));
+          setTotal(matching.length);
+        } else {
+          setRows(list);
+          setTotal(list.total);
+        }
         setListError("");
       })
       .catch((err) => {
@@ -57,7 +65,7 @@ function RequestsPage() {
     return () => {
       cancelled = true;
     };
-  }, [token, status, search, page, data?.requests]);
+  }, [token, status, search, page, data?.requests, data?.approvals]);
 
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -77,7 +85,10 @@ function RequestsPage() {
         >
           <option value="all">All statuses</option>
           <option>Pending</option>
-          <option>Approved</option>
+          <option value="Upcoming">Upcoming (before time frame)</option>
+          <option value="Active">Active (within time frame)</option>
+          <option value="Overdue">Overdue (time frame ended, not clocked out)</option>
+          <option value="Approved">All approved</option>
           <option>Rejected</option>
           <option>Cancelled</option>
           <option>Completed</option>
@@ -97,7 +108,7 @@ function RequestsPage() {
           </thead>
           <tbody>
             {rows.map((r) => {
-              const st = effectiveStatus(r, data.approvals);
+              const st = displayStatus(r, data.approvals);
               const approval = latestApproval(data, r.id);
               return (
                 <tr

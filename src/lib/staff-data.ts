@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { visitPhase } from "@/lib/visit-window";
 import { locationDisplay } from "@/lib/location";
 import { api, asArray } from "@/lib/api/client";
 import type {
@@ -194,6 +195,21 @@ export function effectiveStatus(req: AccessRequest, approvals: AccessRequestAppr
   return mine[0]?.status || req.status || "Pending";
 }
 
+/**
+ * Status shown to managers. "Approved" is split by the approved time frame:
+ * Upcoming = before it starts; Active = inside it; Overdue = it has ended and the
+ * worker has not clocked out; Completed = clocked out.
+ */
+export function displayStatus(req: AccessRequest, approvals: AccessRequestApproval[]) {
+  const status = String(effectiveStatus(req, approvals));
+  if (!/^approved$/i.test(status)) return status;
+  if (req.clockedOutAt || req.completedAt) return "Completed";
+  return visitPhase(req);
+}
+
+/** Statuses the API does not store; the requests page derives them from Approved rows. */
+export const DERIVED_STATUSES = ["Upcoming", "Active", "Overdue"];
+
 export function workerForApproval(data: StaffData | null, approval: AccessRequestApproval) {
   const req = data?.requests.find((r) => r.id === approval.accessRequestId);
   if (req) return workerLabel(data, req.workerId, req);
@@ -242,7 +258,37 @@ export function overdueClockOuts(data: StaffData | null) {
 
 export function isStaffRole(role?: string | null) {
   const r = String(role ?? "").toLowerCase();
-  return r === "admin" || r === "sitemanager" || r === "manager" || r === "viewer";
+  return r === "admin" || r === "sitemanager" || r === "manager" || r === "keyman" || r === "viewer";
+}
+
+/** Roles with manager-level access: they can be mapped to locations and approve requests. */
+export function isManagerRole(role?: string | null) {
+  return /^(admin|sitemanager|manager|keyman)$/i.test(String(role ?? "").trim());
+}
+
+/** Who signs off a room after the worker leaves: the Keyman, or an Admin standing in. */
+export function canReviewRoomLeave(role?: string | null) {
+  return /^(keyman|admin)$/i.test(String(role ?? "").trim());
+}
+
+/** Start and end of a visit as the Keyman sees it: the approved time frame, else the clock times. */
+export function visitSpan(req: AccessRequest) {
+  return {
+    start: req.workFrom || req.clockedInAt || null,
+    end: req.workTo || req.expectedClockOutAt || null,
+  };
+}
+
+/**
+ * Approved visits the worker has not signed out of yet — upcoming, on site or
+ * overdue — ordered by when they start.
+ */
+export function activeRequests(data: Pick<StaffData, "requests" | "approvals"> | null) {
+  if (!data) return [];
+  return data.requests
+    .filter((r) => /^approved$/i.test(String(effectiveStatus(r, data.approvals))))
+    .filter((r) => !r.clockedOutAt && !r.completedAt)
+    .sort((a, b) => String(visitSpan(a).start || "").localeCompare(String(visitSpan(b).start || "")));
 }
 
 export function areaLabel(data: StaffData | null, areaId: number) {

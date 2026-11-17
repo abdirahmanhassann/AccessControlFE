@@ -20,6 +20,7 @@ import { Route as AppAreasRouteImport } from './routes/app/areas'
 import { Route as AppAuditRouteImport } from './routes/app/audit'
 import { Route as AppDepartmentsRouteImport } from './routes/app/departments'
 import { Route as AppHoursRouteImport } from './routes/app/hours'
+import { Route as AppKeymanRouteImport } from './routes/app/keyman'
 import { Route as AppNotificationsRouteImport } from './routes/app/notifications'
 import { Route as AppOverdueRouteImport } from './routes/app/overdue'
 import { Route as AppRequestsRouteImport } from './routes/app/requests'
@@ -85,6 +86,11 @@ const AppHoursRoute = AppHoursRouteImport.update({
   path: '/hours',
   getParentRoute: () => AppRoute,
 } as any)
+const AppKeymanRoute = AppKeymanRouteImport.update({
+  id: '/keyman',
+  path: '/keyman',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppNotificationsRoute = AppNotificationsRouteImport.update({
   id: '/notifications',
   path: '/notifications',
@@ -142,6 +148,7 @@ export interface FileRoutesByFullPath {
   '/app/audit': typeof AppAuditRoute
   '/app/departments': typeof AppDepartmentsRoute
   '/app/hours': typeof AppHoursRoute
+  '/app/keyman': typeof AppKeymanRoute
   '/app/notifications': typeof AppNotificationsRoute
   '/app/overdue': typeof AppOverdueRoute
   '/app/requests': typeof AppRequestsRoute
@@ -163,6 +170,7 @@ export interface FileRoutesByTo {
   '/app/audit': typeof AppAuditRoute
   '/app/departments': typeof AppDepartmentsRoute
   '/app/hours': typeof AppHoursRoute
+  '/app/keyman': typeof AppKeymanRoute
   '/app/notifications': typeof AppNotificationsRoute
   '/app/overdue': typeof AppOverdueRoute
   '/app/requests': typeof AppRequestsRoute
@@ -186,6 +194,7 @@ export interface FileRoutesById {
   '/app/audit': typeof AppAuditRoute
   '/app/departments': typeof AppDepartmentsRoute
   '/app/hours': typeof AppHoursRoute
+  '/app/keyman': typeof AppKeymanRoute
   '/app/notifications': typeof AppNotificationsRoute
   '/app/overdue': typeof AppOverdueRoute
   '/app/requests': typeof AppRequestsRoute
@@ -210,6 +219,7 @@ export interface FileRouteTypes {
     | '/app/audit'
     | '/app/departments'
     | '/app/hours'
+    | '/app/keyman'
     | '/app/notifications'
     | '/app/overdue'
     | '/app/requests'
@@ -231,6 +241,7 @@ export interface FileRouteTypes {
     | '/app/audit'
     | '/app/departments'
     | '/app/hours'
+    | '/app/keyman'
     | '/app/notifications'
     | '/app/overdue'
     | '/app/requests'
@@ -253,6 +264,7 @@ export interface FileRouteTypes {
     | '/app/audit'
     | '/app/departments'
     | '/app/hours'
+    | '/app/keyman'
     | '/app/notifications'
     | '/app/overdue'
     | '/app/requests'
@@ -354,6 +366,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppHoursRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/keyman': {
+      id: '/app/keyman'
+      path: '/keyman'
+      fullPath: '/app/keyman'
+      preLoaderRoute: typeof AppKeymanRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/notifications': {
       id: '/app/notifications'
       path: '/notifications'
@@ -425,6 +444,7 @@ interface AppRouteChildren {
   AppAuditRoute: typeof AppAuditRoute
   AppDepartmentsRoute: typeof AppDepartmentsRoute
   AppHoursRoute: typeof AppHoursRoute
+  AppKeymanRoute: typeof AppKeymanRoute
   AppNotificationsRoute: typeof AppNotificationsRoute
   AppOverdueRoute: typeof AppOverdueRoute
   AppRequestsRoute: typeof AppRequestsRoute
@@ -441,6 +461,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppAuditRoute: AppAuditRoute,
   AppDepartmentsRoute: AppDepartmentsRoute,
   AppHoursRoute: AppHoursRoute,
+  AppKeymanRoute: AppKeymanRoute,
   AppNotificationsRoute: AppNotificationsRoute,
   AppOverdueRoute: AppOverdueRoute,
   AppRequestsRoute: AppRequestsRoute,

@@ -6,6 +6,7 @@ import { readSession } from "@/lib/session";
 import {
   approvalApproverName,
   effectiveStatus,
+  displayStatus,
   overdueClockOuts,
   pendingRequests,
   roomLabel,
@@ -41,6 +42,7 @@ function Overview() {
     const status = effectiveStatus(r, data.approvals);
     return /^approved$/i.test(status) && Boolean(r.clockedInAt) && !r.clockedOutAt && !r.completedAt;
   });
+  const upcoming = data.requests.filter((r) => displayStatus(r, data.approvals) === "Upcoming");
 
   return (
     <div className="sg-content">
@@ -57,6 +59,10 @@ function Overview() {
         <div className="sg-stat">
           <span>Rejected</span>
           <div className="n">{rejected.length}</div>
+        </div>
+        <div className="sg-stat">
+          <span>Upcoming visits</span>
+          <div className="n">{upcoming.length}</div>
         </div>
         <div className="sg-stat">
           <span>On site now</span>
@@ -101,7 +107,7 @@ function Overview() {
                     <strong>{workerLabel(data, r.workerId, r)}</strong>
                     <div className="sg-muted">{roomLabel(data, r.roomId)}</div>
                   </div>
-                  <Badge tone="ok">Approved</Badge>
+                  <Badge tone="ok">On site</Badge>
                 </Link>
               ))
             )}

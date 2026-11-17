@@ -24,6 +24,7 @@ import {
 } from "@/lib/session";
 import { useWorkerFlow } from "@/lib/worker-flow";
 import { prettyPhone, whenExact } from "@/lib/format";
+import { localStamp, windowEnd, windowEnded } from "@/lib/visit-window";
 import { locationDisplay, matchEnteredRoom, parseEnteredRoom } from "@/lib/location";
 import { useMounted } from "@/lib/use-mounted";
 
@@ -1197,7 +1198,8 @@ function VisitStep() {
   const [error, setError] = useState("");
   const [session, refreshSession] = useWorkerSession();
   const clockedIn = Boolean(flow.request?.clockedInAt);
-  const expected = flow.request?.expectedClockOutAt;
+  const expected = flow.request?.workTo || flow.request?.expectedClockOutAt;
+  const expired = flow.request ? windowEnded(flow.request) : false;
 
   useEffect(() => {
     if (flow.room?.id || !flow.request?.roomId || !flow.siteId) return;
@@ -1230,13 +1232,17 @@ function VisitStep() {
       setError("");
       return;
     }
+    if (windowEnded(flow.request)) {
+      setError("Your approved time frame has ended. Contact your site manager.");
+      return;
+    }
     const token = current.token?.trim() || "";
     setBusy(true);
     setError("");
     try {
       const now = new Date();
       const expectedOut =
-        flow.request.expectedClockOutAt || new Date(now.getTime() + 8 * 60 * 60 * 1000).toISOString();
+        flow.request.expectedClockOutAt || localStamp(new Date(now.getTime() + 8 * 60 * 60 * 1000));
       await api.updateAccessRequest(token, {
         id: flow.request.id,
         workerId,
@@ -1245,7 +1251,7 @@ function VisitStep() {
         reason: flow.request.reason,
         workType: flow.request.workType,
         description: flow.request.description,
-        clockedInAt: now.toISOString().slice(0, 19),
+        clockedInAt: localStamp(now),
         expectedClockOutAt: expectedOut.slice(0, 19),
       });
       try {
@@ -1261,7 +1267,7 @@ function VisitStep() {
       flow.set({
         request: {
           ...flow.request,
-          clockedInAt: now.toISOString(),
+          clockedInAt: localStamp(now),
           expectedClockOutAt: expectedOut,
         },
       });
@@ -1294,19 +1300,25 @@ function VisitStep() {
         </div>
       ) : null}
       {expected ? <p className="sg-help">Expected clock out {whenExact(expected)}</p> : null}
+      {expired ? (
+        <p className="sg-error">
+          Overdue: your approved time frame ended at {whenExact(expected)}. You can no longer clock in or
+          sign out here. Contact your site manager to be signed out.
+        </p>
+      ) : null}
       {error ? <p className="sg-error">{error}</p> : null}
       {session ? null : <VerifyAgainNotice action={clockedIn ? "sign out" : "clock in"} />}
       <Button
         variant="primary"
         block
-        disabled={busy || clockedIn || !session}
+        disabled={busy || clockedIn || !session || expired}
         onClick={() => void clockIn()}
       >
         {busy ? "Clocking in…" : clockedIn ? "Already clocked in" : "Clock in"}
       </Button>
       <Button
         block
-        disabled={busy || !session}
+        disabled={busy || !session || expired}
         onClick={() => flow.set({ mode: "clockout", step: "clockout" })}
       >
         Sign out
@@ -1328,6 +1340,14 @@ function ClockOutStep() {
 
   async function finish() {
     if (!flow.request) return;
+    if (windowEnded(flow.request)) {
+      const end = windowEnd(flow.request);
+      setError(
+        `Your approved time frame ended at ${whenExact(end != null ? localStamp(new Date(end)) : null)}. ` +
+          "This visit is overdue. Contact your site manager to be signed out.",
+      );
+      return;
+    }
     if (!photos.length) {
       setError("Take a photo of the room before you sign out.");
       return;
@@ -1353,7 +1373,7 @@ function ClockOutStep() {
           fileName: photo.name,
         });
       }
-      const now = new Date().toISOString();
+      const now = localStamp();
       await api.updateAccessRequest(freshToken, {
         id: flow.request.id,
         workerId,
@@ -1362,8 +1382,8 @@ function ClockOutStep() {
         reason: flow.request.reason,
         workType: flow.request.workType,
         description: flow.request.description,
-        clockedOutAt: now.slice(0, 19),
-        completedAt: now.slice(0, 19),
+        clockedOutAt: now,
+        completedAt: now,
       });
       try {
         await api.insertAudit(freshToken, {
@@ -1441,7 +1461,7 @@ function DoneStep() {
       <h1>Visit closed</h1>
       <p className="sg-muted">
         {prettyPhone(flow.phoneNumber)} · {locationDisplay(flow.room)}. Photos and times
-        are stored for audit.
+        are stored for audit, and the Keyman has been asked to check the room.
       </p>
       <div className="sg-cta-row">
         <Button variant="primary" onClick={() => flow.reset()}>

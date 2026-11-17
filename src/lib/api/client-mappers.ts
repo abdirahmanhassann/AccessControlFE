@@ -11,6 +11,7 @@ import type {
   AccessRequestApproval,
   AuditEvent,
   Department,
+  RoomLeaveReview,
   ScanQrResult,
   Site,
   User,
@@ -164,6 +165,8 @@ export function asRequestRow(data: unknown): AccessRequest {
     workTo: pickStr(row, ["workTo"]) || null,
     towerName: pickStr(row, ["towerName"]),
     locationLabel: pickStr(row, ["locationLabel"]),
+    roomNumber: pickStr(row, ["roomNumber"]) || undefined,
+    roomName: pickStr(row, ["roomName"]) || undefined,
     approvedAt: pickStr(row, ["approvedAt"]) || null,
     rejectedAt: pickStr(row, ["rejectedAt"]) || null,
     clockedInAt: pickStr(row, ["clockedInAt"]) || null,
@@ -194,6 +197,45 @@ export function asApproval(data: unknown): AccessRequestApproval {
     workerFirstName: pickStr(row, ["workerFirstName"]),
     workerLastName: pickStr(row, ["workerLastName"]),
     workerPhoneNumber: pickStr(row, ["workerPhoneNumber"]),
+  };
+}
+
+/** Room-leave status as the UI expects it, whatever case the database returns. */
+export function normalizeRoomLeaveStatus(value: unknown): string {
+  const s = String(value ?? "").trim().toLowerCase();
+  if (s === "approved") return "Approved";
+  if (s === "rejected") return "Rejected";
+  return "Pending";
+}
+
+export function asRoomLeaveReview(data: unknown): RoomLeaveReview {
+  const row = coerceRow(data);
+  return {
+    id: pickNum(row, ["id"]),
+    accessRequestId: pickNum(row, ["accessRequestId"]),
+    status: normalizeRoomLeaveStatus(row.status),
+    reason: pickStr(row, ["reason"]),
+    requestedAt: pickDate(row, ["requestedAt"]) || "",
+    reviewedAt: pickDate(row, ["reviewedAt"]),
+    reviewedByUserId: pickNum(row, ["reviewedByUserId"]) || null,
+    reviewerFirstName: pickStr(row, ["reviewerFirstName"]),
+    reviewerLastName: pickStr(row, ["reviewerLastName"]),
+    workerId: pickNum(row, ["workerId"]),
+    workerFirstName: pickStr(row, ["workerFirstName"]),
+    workerLastName: pickStr(row, ["workerLastName"]),
+    workerPhoneNumber: pickStr(row, ["workerPhoneNumber"]),
+    companyName: pickStr(row, ["companyName"]),
+    roomId: pickNum(row, ["roomId"]),
+    roomNumber: pickStr(row, ["roomNumber"]),
+    roomName: pickStr(row, ["roomName", "name"]),
+    workAreaName: pickStr(row, ["workAreaName"]),
+    siteName: pickStr(row, ["siteName"]),
+    workType: pickStr(row, ["workType"]),
+    workFrom: pickDate(row, ["workFrom"]),
+    workTo: pickDate(row, ["workTo"]),
+    clockedInAt: pickDate(row, ["clockedInAt"]),
+    clockedOutAt: pickDate(row, ["clockedOutAt"]),
+    photoCount: num(row.photoCount),
   };
 }
 

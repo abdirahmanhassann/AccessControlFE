@@ -1,22 +1,23 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { localStamp } from "@/lib/visit-window";
 import { useEffect, useState } from "react";
 import { Badge, Button, Field, PageSkeleton, Textarea, toast } from "@/components/ui";
 import { readSession } from "@/lib/session";
 import {
   approvalApproverName,
   approvalWorkerName,
-  effectiveStatus,
+  displayStatus,
   latestApproval,
   roomLabel,
   useStaffData,
   userLabel,
   workerLabel,
 } from "@/lib/staff-data";
-import { prettyPhone, statusTone, whenExact } from "@/lib/format";
+import { prettyPhone, statusTone, when, whenExact } from "@/lib/format";
 import { useMounted } from "@/lib/use-mounted";
 import { api } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/types";
-import type { AccessRequest, AccessRequestApproval } from "@/lib/api/types";
+import type { AccessRequest, AccessRequestApproval, RoomLeaveReview } from "@/lib/api/types";
 
 export const Route = createFileRoute("/app/requests_/$id")({ component: RequestDetail });
 
@@ -29,6 +30,7 @@ function RequestDetail() {
   const [busy, setBusy] = useState(false);
   const [fetched, setFetched] = useState<AccessRequest | null>(null);
   const [fetchedApprovals, setFetchedApprovals] = useState<AccessRequestApproval[]>([]);
+  const [roomCheck, setRoomCheck] = useState<RoomLeaveReview | null>(null);
   useEffect(() => setToken(readSession()?.token), []);
   const { data, loading, reload, error } = useStaffData(token, { pollRequests: true });
 
@@ -47,6 +49,23 @@ function RequestDetail() {
       cancelled = true;
     };
   }, [token, id, data?.requests, data?.approvals]);
+
+  // The Keyman's check of the room, once the worker has signed out.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    api
+      .getRoomLeaveReviews(token, { accessRequestId: Number(id) })
+      .then((rows) => {
+        if (!cancelled) setRoomCheck(rows[0] ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setRoomCheck(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, id, data?.requests]);
 
   const req = data?.requests.find((r) => r.id === Number(id)) ?? fetched;
 
@@ -82,12 +101,49 @@ function RequestDetail() {
         description: req.description,
         status,
         comment,
-        reviewedAt: new Date().toISOString().slice(0, 19),
+        reviewedAt: localStamp(),
       });
       toast(status === "Approved" ? "Approved" : status === "Rejected" ? "Rejected" : "Cancelled");
       await reload();
     } catch (err) {
       toast(err instanceof ApiError ? err.message : "Could not update approval");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function signOutWorker() {
+    const session = readSession();
+    if (!session || !req) return;
+    setBusy(true);
+    try {
+      const now = localStamp();
+      await api.updateAccessRequest(session.token, {
+        id: req.id,
+        workerId: req.workerId,
+        roomId: req.roomId,
+        status: "Completed",
+        reason: req.reason,
+        workType: req.workType,
+        description: req.description,
+        clockedOutAt: now,
+        completedAt: now,
+      });
+      try {
+        await api.insertAudit(session.token, {
+          accessRequestId: req.id,
+          workerId: req.workerId,
+          userId: session.user.id,
+          eventType: "ClockedOut",
+          description: `Signed out by ${session.user.firstName ?? "manager"} ${session.user.lastName ?? ""}`.trim() + ` after the time frame ended.${comment ? ` Note: ${comment}` : ""}`,
+        });
+      } catch {
+        /* audit is best-effort */
+      }
+      toast("Worker signed out");
+      await reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : "Could not sign the worker out");
     } finally {
       setBusy(false);
     }
@@ -114,7 +170,7 @@ function RequestDetail() {
     { ...data, approvals: fetchedApprovals.length ? fetchedApprovals : data.approvals },
     req.id,
   );
-  const status = effectiveStatus(req, fetchedApprovals.length ? fetchedApprovals : data.approvals);
+  const status = displayStatus(req, fetchedApprovals.length ? fetchedApprovals : data.approvals);
   const workerName = workerLabel(data, req.workerId, latest || req);
   const workerPhone = worker?.phoneNumber || req.workerPhoneNumber || latest?.workerPhoneNumber || "";
 
@@ -181,6 +237,46 @@ function RequestDetail() {
           ) : null}
         </section>
         <aside style={{ display: "grid", gap: 16 }}>
+          {status === "Overdue" ? (
+            <section className="sg-card" style={{ display: "grid", gap: 12 }}>
+              <h2>Overdue</h2>
+              <p className="sg-muted">
+                The approved time frame ended at {whenExact(req.workTo || req.expectedClockOutAt)}
+                {req.clockedInAt ? " and the worker has not clocked out." : " and the worker never clocked in."} The
+                worker can no longer sign out themselves.
+              </p>
+              <Field label="Note for the audit log">
+                <Textarea value={comment} onChange={(e) => setComment(e.target.value)} />
+              </Field>
+              <Button variant="primary" disabled={busy} onClick={() => void signOutWorker()}>
+                {req.clockedInAt ? "Sign worker out" : "Close visit"}
+              </Button>
+            </section>
+          ) : null}
+          {roomCheck ? (
+            <section className="sg-card" style={{ display: "grid", gap: 10 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                <h2>Room check</h2>
+                <Badge tone={roomCheck.status === "Approved" ? "ok" : roomCheck.status === "Rejected" ? "danger" : "warn"}>
+                  {roomCheck.status === "Approved" ? "Room OK" : roomCheck.status === "Rejected" ? "Rejected" : "Waiting for Keyman"}
+                </Badge>
+              </div>
+              {roomCheck.status === "Pending" ? (
+                <p className="sg-muted">
+                  The worker signed out {when(roomCheck.requestedAt)}. A Keyman has been asked to check the room.{" "}
+                  <Link to="/app/keyman">Open room checks</Link>
+                </p>
+              ) : (
+                <p className="sg-muted">
+                  {[roomCheck.reviewerFirstName, roomCheck.reviewerLastName].filter(Boolean).join(" ") || "Keyman"} ·{" "}
+                  {whenExact(roomCheck.reviewedAt)}
+                </p>
+              )}
+              {roomCheck.status === "Rejected" && roomCheck.reason ? (
+                <p className="sg-error">{roomCheck.reason}</p>
+              ) : null}
+            </section>
+          ) : null}
           {latest?.id ? (
             <section className="sg-card" style={{ display: "grid", gap: 12 }}>
               <h2>Decision</h2>

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { localStamp } from "@/lib/visit-window";
 import { Button, toast } from "@/components/ui";
 import { api } from "@/lib/api/client";
 import { readSession } from "@/lib/session";
@@ -52,7 +53,7 @@ export function ApprovalActions({
         description: request?.description,
         status,
         comment: "",
-        reviewedAt: new Date().toISOString().slice(0, 19),
+        reviewedAt: localStamp(),
       });
       try {
         await api.insertAudit(session.token, {

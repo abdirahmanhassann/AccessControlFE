@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Badge, Button, Field, Input, Modal, PageSkeleton, Select, toast } from "@/components/ui";
 import { readSession } from "@/lib/session";
-import { areaLabel, isStaffRole, useStaffData } from "@/lib/staff-data";
+import { areaLabel, isManagerRole, isStaffRole, useStaffData } from "@/lib/staff-data";
 import { useMounted } from "@/lib/use-mounted";
 import { api } from "@/lib/api/client";
 import type { User } from "@/lib/api/types";
@@ -20,13 +20,13 @@ function StaffPage() {
   if (!mounted || loading || !data) return <PageSkeleton />;
 
   const staff = data.users.filter((u) => isStaffRole(u.role));
-  const managers = staff.filter((u) => /manager|admin/i.test(String(u.role)));
+  const managers = staff.filter((u) => isManagerRole(u.role));
 
   return (
     <div className="sg-content">
       {error ? <p className="sg-error">{error}</p> : null}
       <p className="sg-muted">
-        Staff are Users (managers and admins) who approve access. Site contractors live under Workers.
+        Staff are Users (managers, keymen and admins) who approve access. Keymen also sign off rooms after workers leave. Site contractors live under Workers.
       </p>
       <div className="sg-toolbar">
         <Button variant="primary" onClick={() => setEdit("new")}>
@@ -166,6 +166,7 @@ function StaffForm({
           <option>Admin</option>
           <option>SiteManager</option>
           <option>Manager</option>
+          <option>Keyman</option>
           <option>Viewer</option>
         </Select>
       </Field>

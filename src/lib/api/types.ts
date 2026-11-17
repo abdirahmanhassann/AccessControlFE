@@ -1,4 +1,4 @@
-export type Role = "Admin" | "SiteManager" | "Manager" | "Viewer";
+export type Role = "Admin" | "SiteManager" | "Manager" | "Keyman" | "Viewer";
 
 export type RequestStatus =
   | "Pending"
@@ -141,6 +141,8 @@ export type AccessRequest = {
   workTo?: string | null;
   towerName?: string;
   locationLabel?: string;
+  roomNumber?: string;
+  roomName?: string;
   approvedAt: string | null;
   rejectedAt: string | null;
   clockedInAt: string | null;
@@ -179,6 +181,40 @@ export type AccessPhoto = {
   uploadedByWorkerId: number;
   capturedAt: string;
   photoType: string;
+};
+
+/**
+ * The Keyman's check of a room after the worker signed out of it.
+ * One per access request; opened by the API when the visit is clocked out.
+ */
+export type RoomLeaveStatus = "Pending" | "Approved" | "Rejected";
+
+export type RoomLeaveReview = {
+  id: number;
+  accessRequestId: number;
+  status: RoomLeaveStatus | string;
+  reason: string;
+  requestedAt: string;
+  reviewedAt: string | null;
+  reviewedByUserId: number | null;
+  reviewerFirstName?: string;
+  reviewerLastName?: string;
+  workerId: number;
+  workerFirstName?: string;
+  workerLastName?: string;
+  workerPhoneNumber?: string;
+  companyName?: string;
+  roomId: number;
+  roomNumber?: string;
+  roomName?: string;
+  workAreaName?: string;
+  siteName?: string;
+  workType?: string;
+  workFrom?: string | null;
+  workTo?: string | null;
+  clockedInAt?: string | null;
+  clockedOutAt?: string | null;
+  photoCount: number;
 };
 
 export type OTPVerification = {

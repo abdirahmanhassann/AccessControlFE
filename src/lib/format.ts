@@ -37,6 +37,25 @@ export function whenExact(iso?: string | null) {
   return format(d, "d MMM yyyy, HH:mm");
 }
 
+/**
+ * "16 Nov, 09:00 – 17:00" when both ends fall on the same day, otherwise both
+ * ends in full. An open end shows as "—".
+ */
+export function timeRange(start?: string | null, end?: string | null) {
+  const parse = (iso?: string | null) => {
+    if (!iso) return null;
+    const d = parseISO(iso);
+    return isValid(d) ? d : null;
+  };
+  const a = parse(start);
+  const b = parse(end);
+  if (!a && !b) return "—";
+  if (a && b && format(a, "yyyy-MM-dd") === format(b, "yyyy-MM-dd")) {
+    return `${format(a, "d MMM, HH:mm")} – ${format(b, "HH:mm")}`;
+  }
+  return `${a ? format(a, "d MMM, HH:mm") : "—"} – ${b ? format(b, "d MMM, HH:mm") : "—"}`;
+}
+
 export function timeSpan(value?: string | null) {
   if (!value) return "—";
   return value.slice(0, 5);
@@ -44,6 +63,9 @@ export function timeSpan(value?: string | null) {
 
 export function statusTone(status: string) {
   const s = status.toLowerCase();
+  if (s === "upcoming") return "accent";
+  if (s === "on site") return "ok";
+  if (s === "overdue") return "danger";
   if (s === "approved" || s === "completed" || s === "sent" || s === "read" || s === "active") {
     return s === "completed" || s === "read" ? "muted" : "ok";
   }

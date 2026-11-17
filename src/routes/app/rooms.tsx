@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { Badge, Button, Field, Input, Modal, PageSkeleton, Select, Textarea, toast } from "@/components/ui";
 import { QrImage } from "@/components/QrImage";
 import { readSession } from "@/lib/session";
-import { areaLabel, useStaffData } from "@/lib/staff-data";
+import { areaLabel, isManagerRole, useStaffData } from "@/lib/staff-data";
 import { useMounted } from "@/lib/use-mounted";
 import { api } from "@/lib/api/client";
 import type { Room, RoomManager, User } from "@/lib/api/types";
@@ -60,7 +60,7 @@ function RoomsPage() {
       {edit ? (
         <RoomForm
           areas={data.areas}
-          users={data.users.filter((u) => /^(admin|sitemanager|manager)$/i.test(String(u.role)))}
+          users={data.users.filter((u) => isManagerRole(u.role))}
           assigned={data.roomManagers.find((m) => m.roomId === (edit === "new" ? 0 : edit.id) && m.isPrimary) ?? data.roomManagers.find((m) => m.roomId === (edit === "new" ? 0 : edit.id))}
           initial={
             edit === "new"
