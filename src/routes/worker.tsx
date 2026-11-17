@@ -868,23 +868,9 @@ function FormStep() {
         } catch {
           /* backend may already insert the pending approval */
         }
-        try {
-          const manager = managers.find((m) => m.id === approverUserId);
-          await api.insertAudit(token, {
-            accessRequestId: request.id,
-            workerId: worker.id,
-            eventType: "AccessRequested",
-            description: `${worker.firstName} ${worker.lastName} submitted access for ${locationDisplay(picked)} to ${manager ? `${manager.firstName} ${manager.lastName}` : `manager #${approverUserId}`}.`,
-            metadata: JSON.stringify({
-              approverUserId,
-              roomId: resolvedRoomId,
-              towerId: Number(form.towerId),
-              departmentId: Number(form.departmentId),
-            }),
-          });
-        } catch {
-          /* audit is best-effort */
-        }
+        // No AccessRequested audit event from here: InsertAccessRequest writes
+        // one server-side, and writing a second from the browser put two rows
+        // in the audit trail for every request.
       }
       flow.set({ worker, request, room: picked, mode: "waiting", step: "waiting" });
       toast("Request sent. Waiting for a response.");

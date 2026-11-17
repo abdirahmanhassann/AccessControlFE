@@ -55,16 +55,9 @@ export function ApprovalActions({
         comment: "",
         reviewedAt: localStamp(),
       });
-      try {
-        await api.insertAudit(session.token, {
-          accessRequestId: requestId,
-          userId: session.user.id,
-          eventType: status,
-          description: `${session.user.firstName} ${session.user.lastName} marked request #${requestId} as ${status}.`,
-        });
-      } catch {
-        /* audit is best-effort */
-      }
+      // No audit event from here: UpdateAccessRequestApproval writes one
+      // server-side, with the worker id attached, and writing a second from the
+      // browser put two rows in the audit trail for every decision.
       toast(status === "Approved" ? "Approved" : status === "Rejected" ? "Rejected" : "Cancelled");
       await onDone?.();
     } catch (err) {
