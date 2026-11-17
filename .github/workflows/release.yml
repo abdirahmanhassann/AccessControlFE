@@ -1,0 +1,33 @@
+# Build the frontend on every push to main. If the image builds, move the `deploy` branch
+# to this commit; the server notices within ~2 minutes and deploys it
+# (see deploy/autodeploy in the AccessControl repo).
+name: Build and release frontend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write # to move the deploy branch; no AWS keys or other secrets are used
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build the frontend image (same Dockerfile the server uses)
+        run: docker build --build-arg VITE_API_BASE_URL=https://api.example.invalid -t ac-web-ci .
+
+      - name: Release to the server
+        run: |
+          git push --force origin "HEAD:refs/heads/deploy"
+          echo "### Released ${GITHUB_SHA::7}" >> "$GITHUB_STEP_SUMMARY"
+          echo "The server picks this up within about 2 minutes and rolls back by itself if the new site does not answer." >> "$GITHUB_STEP_SUMMARY"
