@@ -27,7 +27,7 @@ import {
   activeRequests,
   canReviewRoomLeave,
   effectiveStatus,
-  isOverdueClockOut,
+  isOverdueVisit,
   visitSpan,
 } from "@/lib/staff-data";
 import { timeRange } from "@/lib/format";
@@ -102,7 +102,7 @@ export function ManagerShell({ children }: { children?: ReactNode }) {
           approvals = [];
         }
         setPending(rows.filter((r) => /^pending$/i.test(effectiveStatus(r, approvals))).length);
-        setOverdue(rows.filter((r) => isOverdueClockOut(r, approvals)).length);
+        setOverdue(rows.filter((r) => isOverdueVisit(r, approvals)).length);
         if (canReviewRoomLeave(s.user.role)) {
           setActive(activeRequests({ requests: rows, approvals }));
         }

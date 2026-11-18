@@ -13,6 +13,7 @@ import {
   MANAGER,
   field,
   keymanFilter,
+  currentHourLocal,
   localHHMM,
   newPage,
   open,
@@ -31,7 +32,7 @@ after(stopHarness);
 test("worker visit → manager approves → sign-out with photo → Keyman approves the room", async (t) => {
   const page = await newPage(t);
   const phone = "07700900999";
-  const from = localHHMM(-5);
+  const from = currentHourLocal();
   const to = localHHMM(120);
 
   // 1. A new worker asks for access.

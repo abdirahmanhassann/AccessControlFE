@@ -108,6 +108,14 @@ function middayTimeZone() {
 
 export const TZ = middayTimeZone();
 
+/**
+ * The top of the current hour, which is the earliest start the request form
+ * accepts. Tests used to book a few minutes in the past; that is now refused.
+ */
+export function currentHourLocal() {
+  return `${localHHMM(0).slice(0, 2)}:00`;
+}
+
 export function localHHMM(offsetMinutes) {
   const d = new Date(Date.now() + offsetMinutes * 60_000);
   return new Intl.DateTimeFormat("en-GB", {

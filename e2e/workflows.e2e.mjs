@@ -14,10 +14,12 @@ import {
   MANAGER,
   PASSWORD,
   SITE_MANAGER,
+  currentHourLocal,
   field,
   localHHMM,
   newPage,
   open,
+  selectMatching,
   shot,
   staffLogin,
   startHarness,
@@ -91,7 +93,7 @@ test("a worker verifies a new phone, requests access, and the manager sees it wa
     firstName: "Grace",
     lastName: "Hopper",
     company: "Hopper Electrical",
-    from: localHHMM(-5),
+    from: currentHourLocal(),
     to: localHHMM(120),
     room: "14.1",
     description: "Second fix in the riser",
@@ -116,7 +118,7 @@ test("a manager rejects a request and the worker's phone says so", async (t) => 
     firstName: "Alan",
     lastName: "Turing",
     company: "Turing Electrical",
-    from: localHHMM(-5),
+    from: currentHourLocal(),
     to: localHHMM(120),
     room: "15.3",
     description: "Trace the ring main",
@@ -137,6 +139,42 @@ test("a manager rejects a request and the worker's phone says so", async (t) => 
   await page.getByRole("heading", { name: "Request declined" }).waitFor({ timeout: 20_000 });
   await page.getByRole("button", { name: "Submit a new request" }).waitFor();
   await shot(page, "c3-worker-declined");
+});
+
+test("a worker cannot book a time frame that has already passed", async (t) => {
+  const page = await newPage(t);
+
+  await workerVerify(page, "07700900813");
+  await page.getByRole("heading", { name: "Access request" }).waitFor();
+
+  // Everything valid except the start, which is hours behind the current hour.
+  await field(page, "First name").fill("Edsger");
+  await field(page, "Last name").fill("Dijkstra");
+  await field(page, "Company they work for").fill("Shortest Path Electrical");
+  await field(page, "Their supervisor").fill("Site Supervisor");
+  await field(page, "Type of job").selectOption("Electrical");
+  await field(page, "From").fill("00:30");
+  await field(page, "To").fill(localHHMM(120));
+  await selectMatching(field(page, "Which site"), /^Riverside/);
+  await selectMatching(field(page, "Department"), /^Electrical$/);
+  await field(page, "Room").fill("16.4");
+  await field(page, "What are you doing?").fill("Book a slot that has gone");
+  await selectMatching(field(page, "Manager to approve"), /James Cole/);
+  await page.getByRole("button", { name: "Submit form" }).click();
+
+  // Refused, and still on the form rather than waiting for approval.
+  await page.getByText(/start time has already passed/i).waitFor();
+  await page.getByRole("heading", { name: "Access request" }).waitFor();
+  assert.equal(
+    await page.getByRole("heading", { name: "Waiting for approval" }).count(),
+    0,
+    "nothing was submitted",
+  );
+
+  // The current hour is accepted.
+  await field(page, "From").fill(currentHourLocal());
+  await page.getByRole("button", { name: "Submit form" }).click();
+  await page.getByRole("heading", { name: "Waiting for approval" }).waitFor();
 });
 
 test("an overdue visit is listed for the manager and can be closed from the request", async (t) => {

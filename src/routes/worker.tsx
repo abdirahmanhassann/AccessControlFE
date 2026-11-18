@@ -560,6 +560,27 @@ function toDateTime(date: string, time: string) {
   return `${date}T${time}:00`;
 }
 
+/**
+ * The earliest a worker may book: the top of the hour they are standing in.
+ * Not the exact minute, so someone filling the form at 10:58 can still say
+ * "10:00" for work they have the gate open for now.
+ */
+function currentHourHHMM(d = new Date()) {
+  return `${String(d.getHours()).padStart(2, "0")}:00`;
+}
+
+function startOfCurrentHour(d = new Date()) {
+  const floor = new Date(d);
+  floor.setMinutes(0, 0, 0);
+  return floor.getTime();
+}
+
+/** The default start: the working day, or now if the day is already under way. */
+function defaultStartTime(d = new Date()) {
+  const hour = currentHourHHMM(d);
+  return hour > "08:00" ? hour : "08:00";
+}
+
 function placeLabel(area: WorkArea, all: WorkArea[], sites: Site[]) {
   const siteName = area.siteName || sites.find((s) => s.id === area.siteId)?.name || "";
   const siblings = all.filter((a) => a.siteId === area.siteId);
@@ -578,7 +599,7 @@ function FormStep() {
     supervisorName: "",
     workType: "",
     workDate: todayIsoDate(),
-    workFrom: "08:00",
+    workFrom: defaultStartTime(),
     workTo: "17:00",
     siteId: flow.siteId ? String(flow.siteId) : "",
     towerId: flow.room?.workAreaId ? String(flow.room.workAreaId) : "",
@@ -783,6 +804,13 @@ function FormStep() {
       setError("Choose the type of job.");
       return;
     }
+    const startAt = Date.parse(toDateTime(form.workDate, form.workFrom));
+    if (Number.isFinite(startAt) && startAt < startOfCurrentHour()) {
+      setError(
+        `That start time has already passed. The earliest you can book is ${currentHourHHMM()} today.`,
+      );
+      return;
+    }
     if (form.workFrom && form.workTo && form.workTo <= form.workFrom) {
       setError("The 'to' time must be after the start time.");
       return;
@@ -948,6 +976,7 @@ function FormStep() {
       <Field label="Date on site">
         <Input
           type="date"
+          min={todayIsoDate()}
           value={form.workDate}
           onChange={(e) => setForm({ ...form, workDate: e.target.value })}
           required
@@ -957,6 +986,9 @@ function FormStep() {
         <Field label="From">
           <Input
             type="time"
+            // Deliberately no `min`: the browser would block the submit with its
+            // own tooltip and the worker would never see the form's own message,
+            // which says what the earliest start actually is.
             value={form.workFrom}
             onChange={(e) => setForm({ ...form, workFrom: e.target.value })}
             required

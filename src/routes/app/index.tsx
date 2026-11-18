@@ -7,7 +7,7 @@ import {
   approvalApproverName,
   effectiveStatus,
   displayStatus,
-  overdueClockOuts,
+  overdueVisits,
   pendingRequests,
   roomLabel,
   useStaffData,
@@ -29,7 +29,7 @@ function Overview() {
   if (!mounted || loading || !data) return <PageSkeleton />;
 
   const pending = pendingRequests(data);
-  const overdue = overdueClockOuts(data);
+  const overdue = overdueVisits(data);
   const approvals = [...data.approvals].sort((a, b) => {
     const ar = a.reviewedAt ? 1 : 0;
     const br = b.reviewedAt ? 1 : 0;

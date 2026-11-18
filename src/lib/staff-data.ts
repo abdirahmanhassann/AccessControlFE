@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { visitPhase } from "@/lib/visit-window";
+import { effectiveStatus } from "./overdue";
 import { locationDisplay } from "@/lib/location";
 import { api, asArray } from "@/lib/api/client";
 import type {
@@ -145,6 +146,15 @@ export function useStaffData(token: string | undefined, options?: { pollRequests
   return { data, error, loading, reload };
 }
 
+export {
+  dueClockOutAt,
+  effectiveStatus,
+  isOverdueClockOut,
+  isOverdueVisit,
+  overdueClockOuts,
+  overdueVisits,
+} from "./overdue";
+
 export function roomLabel(data: StaffData | null, roomId: number) {
   const room = data?.rooms.find((r) => r.id === roomId);
   if (!room) return `Location #${roomId}`;
@@ -185,16 +195,6 @@ export function latestApproval(data: StaffData | null, accessRequestId: number) 
     .sort((a, b) => String(b.reviewedAt || b.createdAt).localeCompare(String(a.reviewedAt || a.createdAt)))[0];
 }
 
-export function effectiveStatus(req: AccessRequest, approvals: AccessRequestApproval[]) {
-  const mine = approvals
-    .filter((a) => a.accessRequestId === req.id)
-    .sort((a, b) => String(b.reviewedAt || b.createdAt).localeCompare(String(a.reviewedAt || a.createdAt)));
-  const decided = mine.find((a) => /^(approved|rejected|cancelled)$/i.test(String(a.status)));
-  if (decided) return decided.status;
-  if (req.status && !/^pending$/i.test(String(req.status))) return req.status;
-  return mine[0]?.status || req.status || "Pending";
-}
-
 /**
  * Status shown to managers. "Approved" is split by the approved time frame:
  * Upcoming = before it starts; Active = inside it; Overdue = it has ended and the
@@ -227,34 +227,6 @@ export function pendingRequests(data: StaffData | null) {
 }
 
 /** Planned leave time: prefer WorkTo (what the worker entered), then ExpectedClockOutAt. */
-export function dueClockOutAt(req: AccessRequest): string | null {
-  const raw = req.workTo || req.expectedClockOutAt || null;
-  if (!raw) return null;
-  const t = Date.parse(raw);
-  return Number.isFinite(t) ? raw : null;
-}
-
-export function isOverdueClockOut(req: AccessRequest, approvals: AccessRequestApproval[] = []) {
-  if (req.clockedOutAt || req.completedAt) return false;
-  if (!req.clockedInAt) return false;
-  const dueRaw = dueClockOutAt(req);
-  if (!dueRaw) return false;
-  const status = effectiveStatus(req, approvals);
-  if (!/^approved$/i.test(String(status))) return false;
-  const due = Date.parse(dueRaw);
-  return Number.isFinite(due) && due < Date.now();
-}
-
-export function overdueClockOuts(data: StaffData | null) {
-  if (!data) return [];
-  return data.requests
-    .filter((r) => isOverdueClockOut(r, data.approvals))
-    .sort((a, b) => {
-      const da = dueClockOutAt(a) || "";
-      const db = dueClockOutAt(b) || "";
-      return da.localeCompare(db);
-    });
-}
 
 export function isStaffRole(role?: string | null) {
   const r = String(role ?? "").toLowerCase();

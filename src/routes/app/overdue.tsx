@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Badge, PageSkeleton } from "@/components/ui";
 import { readSession } from "@/lib/session";
-import { dueClockOutAt, overdueClockOuts, roomLabel, useStaffData, workerLabel } from "@/lib/staff-data";
+import { dueClockOutAt, overdueVisits, roomLabel, useStaffData, workerLabel } from "@/lib/staff-data";
 import { when, whenExact } from "@/lib/format";
 import { useMounted } from "@/lib/use-mounted";
 
@@ -16,14 +16,15 @@ function OverduePage() {
 
   if (!mounted || loading || !data) return <PageSkeleton />;
 
-  const rows = overdueClockOuts(data);
+  const rows = overdueVisits(data);
 
   return (
     <div className="sg-content">
       {error ? <p className="sg-error">{error}</p> : null}
       <p className="sg-muted">
-        Workers who clocked in and are still on site after the <strong>Work to</strong> time on their
-        request.
+        Approved visits past the <strong>Work to</strong> time on their request that nobody has
+        closed — whether the worker is still on site or never turned up. A worker cannot sign
+        themselves out once the time frame has ended, so each one needs a manager.
       </p>
       <section className="sg-card" style={{ marginTop: 16 }}>
         <h2>Overdue clock-outs</h2>
@@ -38,7 +39,8 @@ function OverduePage() {
                   <div>
                     <strong>{workerLabel(data, r.workerId, r)}</strong>
                     <div className="sg-muted">
-                      {roomLabel(data, r.roomId)} · due {whenExact(due)}
+                      {roomLabel(data, r.roomId)} · due {whenExact(due)} ·{" "}
+                      {r.clockedInAt ? "still on site" : "never clocked in"}
                     </div>
                   </div>
                   <Badge tone="danger">{when(due)}</Badge>
