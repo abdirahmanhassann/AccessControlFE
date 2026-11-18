@@ -145,6 +145,10 @@ export function asWorkerRow(
     companyName: pickStr(row, ["companyName"]) || fallback?.companyName || "",
     isActive: row.isActive !== false && row.IsActive !== false,
     createdAt: pickStr(row, ["createdAt"]) || new Date().toISOString(),
+    blockedAt: pickStr(row, ["blockedAt"]) || null,
+    blockedReason: pickStr(row, ["blockedReason"]) || null,
+    overdueCount: pickNum(row, ["overdueCount"]),
+    photoRejectedCount: pickNum(row, ["photoRejectedCount"]),
   };
 }
 

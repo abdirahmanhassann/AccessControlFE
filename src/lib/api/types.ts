@@ -63,6 +63,18 @@ export type Worker = {
   companyName: string;
   isActive: boolean;
   createdAt: string;
+  /** Set when the worker is blocked from requesting access; null when they are not. */
+  blockedAt?: string | null;
+  blockedReason?: string | null;
+  /** Open strikes behind a block, from the API. */
+  overdueCount?: number;
+  photoRejectedCount?: number;
+};
+
+/** The auto-block thresholds. 0 turns a rule off. */
+export type AppSettings = {
+  autoBlockOverdueCount: number;
+  autoBlockPhotoRejectedCount: number;
 };
 
 export type WorkAreaManager = {

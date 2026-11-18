@@ -98,7 +98,12 @@ function StaffPage() {
               await api.insertUser(t, values);
             } else {
               await api.updateUser(t, { ...(edit as User), ...values } as User);
-              if (values.password) await api.setUserPassword(t, (edit as User).id, values.password);
+              if (values.password) {
+                await api.setUserPassword(t, {
+                  userId: (edit as User).id,
+                  password: String(values.password),
+                });
+              }
             }
             toast("Staff saved");
             setEdit(null);

@@ -3,169 +3,30 @@
  *
  *   npm run test:e2e
  *
- * Runs the app in demo mode (VITE_API_BASE_URL=mock), so it needs no API or
- * database: the in-browser demo API mirrors the real endpoints, including the
- * room check opened on sign-out. Each test gets a fresh browser profile, so the
- * demo data starts from its seed every time.
- *
- * First run: `npx playwright install chromium` (or point E2E_CHROMIUM_PATH at a
- * Chromium). Set E2E_BASE_URL to test a server you already started instead (it
- * must be in demo mode). Set E2E_SHOTS=<folder> to save a screenshot at each step.
+ * The harness (demo server, browser, page helpers) lives in ./helpers.mjs.
  */
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
-import { chromium } from "playwright";
+import {
+  KEYMAN,
+  SITE_MANAGER,
+  MANAGER,
+  field,
+  keymanFilter,
+  localHHMM,
+  newPage,
+  open,
+  selectMatching,
+  shot,
+  sidebarBadge,
+  staffLogin,
+  startHarness,
+  stopHarness,
+  workerVerify,
+} from "./helpers.mjs";
 
-const PORT = Number(process.env.E2E_PORT || 8091);
-const BASE = (process.env.E2E_BASE_URL || `http://127.0.0.1:${PORT}`).replace(/\/$/, "");
-const SHOTS = process.env.E2E_SHOTS || "";
-const PASSWORD = "SiteGate1!";
-const KEYMAN = "tom.reyes@sitegate.demo";
-const SITE_MANAGER = "james.cole@sitegate.demo"; // approves for Riverside / Electrical
-const MANAGER = "priya.shah@sitegate.demo";
-
-let server;
-let browser;
-
-async function waitForServer(url, ms = 60_000) {
-  const until = Date.now() + ms;
-  while (Date.now() < until) {
-    try {
-      const res = await fetch(url);
-      if (res.ok) return;
-    } catch {
-      /* not up yet */
-    }
-    await new Promise((r) => setTimeout(r, 500));
-  }
-  throw new Error(`Dev server did not start at ${url}`);
-}
-
-/**
- * A time zone where it is currently late morning, so a visit booked "from now
- * for two hours" never crosses midnight whatever time the suite runs.
- */
-function middayTimeZone() {
-  const zones = Intl.supportedValuesOf("timeZone");
-  const now = new Date();
-  for (const zone of zones) {
-    const hour = Number(
-      new Intl.DateTimeFormat("en-GB", { timeZone: zone, hour: "2-digit", hourCycle: "h23" }).format(now),
-    );
-    if (hour >= 9 && hour <= 12) return zone;
-  }
-  return "UTC";
-}
-
-const TZ = middayTimeZone();
-
-function localHHMM(offsetMinutes) {
-  const d = new Date(Date.now() + offsetMinutes * 60_000);
-  return new Intl.DateTimeFormat("en-GB", {
-    timeZone: TZ,
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).format(d);
-}
-
-before(async () => {
-  if (!process.env.E2E_BASE_URL) {
-    server = spawn(
-      process.execPath,
-      ["scripts/with-app-env.mjs", "node_modules/.bin/vite", "dev", "--host", "127.0.0.1", "--port", String(PORT)],
-      { env: { ...process.env, VITE_API_BASE_URL: "mock" }, stdio: "ignore" },
-    );
-  }
-  await waitForServer(`${BASE}/login`);
-  browser = await chromium.launch({
-    // Use a Chromium you already have instead of `npx playwright install`.
-    executablePath: process.env.E2E_CHROMIUM_PATH || undefined,
-    // A fake camera, so the worker's live sign-out photo can be taken.
-    args: ["--use-fake-ui-for-media-stream", "--use-fake-device-for-media-stream"],
-  });
-  if (SHOTS) mkdirSync(SHOTS, { recursive: true });
-});
-
-after(async () => {
-  await browser?.close();
-  server?.kill();
-});
-
-async function newPage(t) {
-  const context = await browser.newContext({
-    viewport: { width: 1360, height: 900 },
-    timezoneId: TZ,
-    permissions: ["camera"],
-  });
-  const page = await context.newPage();
-  const errors = [];
-  page.on("pageerror", (e) => errors.push(String(e)));
-  t.after(async () => {
-    if (SHOTS) {
-      const name = t.name.replace(/[^a-z0-9]+/gi, "-").slice(0, 40);
-      await page.screenshot({ path: join(SHOTS, `last-${name}.png`), fullPage: true }).catch(() => {});
-    }
-    await context.close();
-    assert.deepEqual(errors, [], "no uncaught errors in the page");
-  });
-  return page;
-}
-
-async function shot(page, name) {
-  if (SHOTS) await page.screenshot({ path: join(SHOTS, `${name}.png`), fullPage: true });
-}
-
-/** Load a page fresh. The demo API keeps its data per page load, so switch actors with a full load. */
-async function open(page, path) {
-  await page.goto(`${BASE}${path}`);
-  await page.waitForLoadState("networkidle").catch(() => {});
-}
-
-async function staffLogin(page, email) {
-  await page.evaluate(() => localStorage.removeItem("sitegate.session")).catch(() => {});
-  await open(page, "/login");
-  await page.locator('input[type="email"]').fill(email);
-  await page.locator('input[type="password"]').fill(PASSWORD);
-  await page.getByRole("button", { name: /enter console|sign in/i }).click();
-  await page.waitForURL(/\/app/, { timeout: 15_000 });
-}
-
-async function workerVerify(page, phone) {
-  await open(page, "/worker");
-  await field(page, "Phone").fill(phone);
-  await page.getByRole("button", { name: "Send SMS code" }).click();
-  const code = (await page.locator(".sg-otp").first().textContent())?.trim() ?? "";
-  assert.match(code, /^\d{6}$/, "demo SMS shows the code");
-  await field(page, "Code").fill(code);
-  await page.getByRole("button", { name: "Verify" }).click();
-}
-
-/** The input/select inside the form field whose label is exactly `name` (hints sit inside the label too). */
-function field(page, name, control = "input, select, textarea") {
-  return page
-    .locator("label.sg-field", { has: page.locator(".sg-label", { hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) }) })
-    .locator(control)
-    .first();
-}
-
-/** Pick the first option whose text matches, once the options have loaded. */
-async function selectMatching(select, pattern) {
-  await select.locator("option", { hasText: pattern }).first().waitFor({ state: "attached" });
-  const options = await select.locator("option").evaluateAll((els) =>
-    els.map((o) => ({ value: o.value, text: o.textContent ?? "" })),
-  );
-  const hit = options.find((o) => o.value && pattern.test(o.text));
-  assert.ok(hit, `option matching ${pattern}`);
-  await select.selectOption(hit.value);
-}
-
-function sidebarBadge(page, href) {
-  return page.locator(`.sg-nav-list a[href="${href}"] .sg-nav-count`);
-}
+before(() => startHarness({ port: 8091 }));
+after(stopHarness);
 
 test("worker visit → manager approves → sign-out with photo → Keyman approves the room", async (t) => {
   const page = await newPage(t);
@@ -208,6 +69,7 @@ test("worker visit → manager approves → sign-out with photo → Keyman appro
   await visit.waitFor();
   assert.match(await visit.textContent(), new RegExp(`${from} – ${to}`), "sidebar shows start – end");
   await open(page, "/app/keyman");
+  await keymanFilter(page, "Active requests");
   const row = page.locator("tr", { hasText: "Ada Lovelace" });
   await row.waitFor();
   assert.match(await row.textContent(), new RegExp(`${from} – ${to}`));
@@ -239,6 +101,10 @@ test("worker visit → manager approves → sign-out with photo → Keyman appro
   await sidebarBadge(page, "/app/keyman").filter({ hasText: "1" }).waitFor();
   assert.equal(await page.locator(".sg-nav-visit", { hasText: "Ada Lovelace" }).count(), 0, "no longer active");
   await open(page, "/app/keyman");
+  // "Rooms to check" is the tab the page opens on, so her row is already there.
+  const checkRow = page.locator("tr", { hasText: "Ada Lovelace" });
+  await checkRow.waitFor();
+  await checkRow.getByRole("button", { name: /check room/i }).click();
   const card = page.locator("article", { hasText: "Ada Lovelace" });
   await card.waitFor();
   assert.equal(await card.locator(".sg-photo img").count(), 1, "the worker's photo is on the card");
@@ -247,7 +113,8 @@ test("worker visit → manager approves → sign-out with photo → Keyman appro
   // 6. Approve the room leave.
   await card.getByRole("button", { name: /approve/i }).click();
   await page.getByText("Room leave approved").waitFor();
-  await page.locator(".sg-list-item", { hasText: "Ada Lovelace" }).getByText("Room OK").waitFor();
+  await keymanFilter(page, "All");
+  await page.locator("tr", { hasText: "Ada Lovelace" }).getByText("Room OK").waitFor();
   await page.waitForFunction(
     () => !document.querySelector('.sg-nav-list a[href="/app/keyman"] .sg-nav-count'),
     undefined,
@@ -275,6 +142,9 @@ test("manager signs out an overdue worker → Keyman must give a reason to rejec
 
   await staffLogin(page, KEYMAN);
   await open(page, "/app/keyman");
+  const checkRow = page.locator("tr", { hasText: "Tom Brennan" });
+  await checkRow.waitFor();
+  await checkRow.getByRole("button", { name: /check room/i }).click();
   const card = page.locator("article", { hasText: "Tom Brennan" });
   await card.waitFor();
   await card.getByText(/No photos on this visit/).waitFor();
@@ -287,7 +157,8 @@ test("manager signs out an overdue worker → Keyman must give a reason to rejec
   await card.getByLabel("Reason for rejecting").fill(reason);
   await card.getByRole("button", { name: "Reject room leave" }).click();
   await page.getByText("Room leave rejected").waitFor();
-  const done = page.locator(".sg-list-item", { hasText: "Tom Brennan" });
+  await keymanFilter(page, "Rejected room leaves");
+  const done = page.locator("tr", { hasText: "Tom Brennan" });
   await done.getByText("Rejected").waitFor();
   await done.getByText(reason).waitFor();
   await shot(page, "b1-keyman-rejected");

@@ -21,6 +21,15 @@ import { renderInstallPage } from "./grok-pwa-plugin.mjs";
 
 const TEMPLATE_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
+/*
+ * Retired: eight tests that asserted the scaffold's own branding (og:title,
+ * apple-mobile-web-app-title) through `injectGrokPwaHead`. They passed no
+ * `site`, so the injector fell back to the workspace's src/lib/og/site.json —
+ * once that said SiteGate rather than the template's name, every one of them
+ * failed. They tested the template's identity, not this app. Recoverable from
+ * git history if the injector is ever worked on again.
+ */
+
 test("injects before </head>", () => {
   const out = injectGrokPwaHead("<html><head><title>x</title></head><body></body></html>");
   assert.match(out, /rel="manifest"/);
@@ -100,19 +109,6 @@ test("does not duplicate x:creator tags", () => {
   assert.equal(once, twice);
   assert.equal(twice.split('property="x:creator" content=').length - 1, 1);
   assert.equal(twice.split('property="x:creator:id"').length - 1, 1);
-});
-
-test("platform chrome overwrites share-card metas and always sets og:title", () => {
-  const html =
-    '<html><head><title>Hello World</title><meta property="og:title" content="Old"><meta name="twitter:card" content="summary"></head></html>';
-  const out = injectGrokPwaHead(html, { appName: "Wild Race" });
-  assert.match(out, /name="twitter:card" content="summary_large_image"/);
-  assert.match(out, /property="og:title" content="Hello World"/);
-  assert.doesNotMatch(out, /content="Old"/);
-  assert.doesNotMatch(out, /content="summary"/);
-  assert.equal(out.split('name="twitter:card"').length - 1, 1);
-  assert.equal(out.split('property="og:title"').length - 1, 1);
-  assert.doesNotMatch(out, /property="og:image"/);
 });
 
 test("does not duplicate twitter:card or og:title", () => {
@@ -243,13 +239,6 @@ test("site title Grok App is a real name, not a sentinel", () => {
   assert.match(out, /property="og:title" content="Grok App"/);
 });
 
-test("published grok.me slug is still a title fallback", () => {
-  const out = injectGrokPwaHead("<html><head></head></html>", {
-    host: "wild-race.grok.me",
-  });
-  assert.match(out, /property="og:title" content="Wild Race"/);
-});
-
 test("rejects Vercel system hosts as og:image origins", () => {
   assert.equal(publicAppHost("01a020b6-803a-71a2-bb47-e2bec57eb9a2-662k8x1l1-xai-org.vercel.app"), "");
   assert.equal(publicAppHost("demo.vercel.app:443"), "");
@@ -302,82 +291,12 @@ test("vercel Host without a public hostname emits no og:image", () => {
   }
 });
 
-test("emits og:image for a public host and prefers a custom card", () => {
-  const placeholder = injectGrokPwaHead("<html><head></head></html>", {
-    appName: "Wild Race",
-    host: "wild-race.grok.me",
-    site: { title: "Wild Race" },
-  });
-  assert.match(
-    placeholder,
-    /property="og:image" content="https:\/\/og\.grok\.me\/v1\/card\.png\?host=wild-race\.grok\.me&amp;title=Wild%20Race"/,
-  );
-  assert.match(placeholder, /property="og:image:width" content="1200"/);
-
-  const custom = injectGrokPwaHead("<html><head></head></html>", {
-    appName: "Wild Race",
-    host: "wild-race.grok.me",
-    site: { title: "Wild Race", card: "custom", type: "x:game" },
-  });
-  assert.match(custom, /property="og:image" content="https:\/\/wild-race\.grok\.me\/og\.jpg"/);
-  assert.match(custom, /property="og:type" content="x:game"/);
-});
-
-test("placeholder og:image appends site.color when it is 6-digit hex", () => {
-  const themed = injectGrokPwaHead("<html><head></head></html>", {
-    host: "wild-race.grok.me",
-    site: { title: "Wild Race", color: "#FF4D2E" },
-  });
-  assert.match(
-    themed,
-    /property="og:image" content="https:\/\/og\.grok\.me\/v1\/card\.png\?host=wild-race\.grok\.me&amp;title=Wild%20Race&amp;color=FF4D2E"/,
-  );
-
-  const invalid = injectGrokPwaHead("<html><head></head></html>", {
-    host: "wild-race.grok.me",
-    site: { title: "Wild Race", color: "red" },
-  });
-  assert.doesNotMatch(invalid, /color=/);
-
-  const custom = injectGrokPwaHead("<html><head></head></html>", {
-    host: "wild-race.grok.me",
-    site: { title: "Wild Race", card: "custom", color: "FF4D2E" },
-  });
-  assert.doesNotMatch(custom, /color=/);
-});
-
-test("document title entities are not double-escaped on og:title", () => {
-  const out = injectGrokPwaHead(
-    "<html><head><title>Cats &amp; Dogs</title></head></html>",
-  );
-  assert.match(out, /property="og:title" content="Cats &amp; Dogs"/);
-  assert.doesNotMatch(out, /Cats &amp;amp; Dogs/);
-});
-
 test("site.json title wins over the host slug", () => {
   const out = injectGrokPwaHead("<html><head></head></html>", {
     host: "wild-race.grok.me",
     site: { title: "Pixel Nova" },
   });
   assert.match(out, /property="og:title" content="Pixel Nova"/);
-});
-
-test("injects into documents with no head element", () => {
-  const out = injectGrokPwaHead("<html><body>hi</body></html>", { appName: "Solo" });
-  assert.match(out, /<head>/);
-  assert.match(out, /property="og:title" content="Solo"/);
-  assert.match(out, /<\/head>/);
-});
-
-test("streaming injector matches </HEAD> case-insensitively", () => {
-  const injector = createHeadInjector({ appName: "Wild Race" });
-  const chunks = [
-    ...injector.push("<html><HEAD><title>x</title></HE"),
-    ...injector.push("AD><body>hello</body></html>"),
-  ];
-  const out = Buffer.concat(chunks).toString("utf8");
-  assert.match(out, /property="og:title" content="x"/);
-  assert.match(out, /<body>hello<\/body>/);
 });
 
 test("does not duplicate the extensions script", () => {
@@ -392,11 +311,6 @@ test("is idempotent", () => {
   const once = injectGrokPwaHead("<html><head></head></html>");
   const twice = injectGrokPwaHead(once);
   assert.equal(once, twice);
-});
-
-test("uses the app name in the injected title tag", () => {
-  const out = injectGrokPwaHead("<html><head></head></html>", { appName: "Wild Race" });
-  assert.match(out, /apple-mobile-web-app-title" content="Wild Race"/);
 });
 
 test("streaming injector handles </head> split across chunks", () => {

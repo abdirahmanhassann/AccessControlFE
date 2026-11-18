@@ -23,6 +23,7 @@ import type { ListFilter } from "./client-list";
 import type {
   AccessRequest,
   AccessWindow,
+  AppSettings,
   Room,
   RoomManager,
   Worker,
@@ -41,6 +42,38 @@ export const apiPart1b = {
   }) => asWorkerRow(await post<unknown>("/Access/insertworker", data), data),
   updateWorker: (token: string, data: Worker) =>
     post<Worker | null>("/Access/updateworker", { token, ...data }),
+  /** Block or unblock a worker by hand. Unblocking forgives their open strikes. */
+  setWorkerBlock: (token: string, data: { workerId: number; blocked: boolean; reason?: string }) =>
+    post<null>("/Access/setworkerblock", {
+      token,
+      workerId: data.workerId,
+      blocked: data.blocked,
+      reason: data.reason ?? "",
+    }),
+
+  /** The API returns settings as name/value rows; the app wants two numbers. */
+  getSettings: async (token: string): Promise<AppSettings> => {
+    const rows = asArray<unknown>(await post("/Access/getsettings", { token }));
+    const find = (name: string, fallback: number) => {
+      for (const entry of rows) {
+        const row = entry as Record<string, unknown>;
+        if (String(row.name ?? row.Name ?? "").toLowerCase() !== name.toLowerCase()) continue;
+        const parsed = Number(row.value ?? row.Value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+      }
+      return fallback;
+    };
+    return {
+      autoBlockOverdueCount: find("AutoBlockOverdueCount", 0),
+      autoBlockPhotoRejectedCount: find("AutoBlockPhotoRejectedCount", 0),
+    };
+  },
+  updateSettings: (token: string, data: AppSettings) =>
+    post<unknown>("/Access/updatesettings", {
+      token,
+      autoBlockOverdueCount: data.autoBlockOverdueCount,
+      autoBlockPhotoRejectedCount: data.autoBlockPhotoRejectedCount,
+    }),
 
   getRooms: async (token: string) =>
     asArray<unknown>(await post("/Access/getrooms", { token })).map((row) => asRoom(row)),

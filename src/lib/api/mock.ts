@@ -46,6 +46,7 @@ type Db = {
   audits: AuditEvent[];
   /** Optional so demo data saved by an earlier build still loads. */
   roomLeaveReviews?: RoomLeaveReview[];
+  settings?: Record<string, string>;
   sessions: Session[];
   seq: Record<string, number>;
 };
@@ -964,6 +965,20 @@ function openRoomLeaveReview(req: AccessRequest) {
 
 type Body = Record<string, unknown>;
 
+/** Auto-block thresholds, kept in the demo database so they survive a reload. */
+const DEFAULT_SETTINGS: Record<string, string> = {
+  AutoBlockOverdueCount: "3",
+  AutoBlockPhotoRejectedCount: "3",
+};
+
+function settingsOf(db: Db): Record<string, string> {
+  if (!db.settings) db.settings = { ...DEFAULT_SETTINGS };
+  return db.settings;
+}
+
+const settingRows = (db: Db) =>
+  Object.entries(settingsOf(db)).map(([name, value]) => ({ name, value }));
+
 const handlers: Record<string, (body: Body) => unknown> = {
   "/Access/login": (body) => {
     const db = load();
@@ -1342,6 +1357,35 @@ const handlers: Record<string, (body: Body) => unknown> = {
   "/Access/getworkers": (body) => {
     requireStaff(body as { token?: string });
     return load().workers;
+  },
+  "/Access/getsettings": (body) => {
+    requireStaff(body as { token?: string });
+    return settingRows(load());
+  },
+  "/Access/updatesettings": (body) => {
+    const actor = requireStaff(body as { token?: string });
+    if (String(actor.user?.role ?? "").toLowerCase() !== "admin") {
+      throw new ApiError(403, "Only an Admin can change these settings.");
+    }
+    const db = load();
+    const settings = settingsOf(db);
+    settings.AutoBlockOverdueCount = String(Math.max(0, Number(body.autoBlockOverdueCount) || 0));
+    settings.AutoBlockPhotoRejectedCount = String(
+      Math.max(0, Number(body.autoBlockPhotoRejectedCount) || 0),
+    );
+    persist();
+    return settingRows(db);
+  },
+  "/Access/setworkerblock": (body) => {
+    requireStaff(body as { token?: string });
+    const db = load();
+    const worker = db.workers.find((w) => w.id === Number(body.workerId));
+    if (!worker) throw new ApiError(404, "Worker not found");
+    const blocked = Boolean(body.blocked);
+    worker.blockedAt = blocked ? new Date().toISOString() : null;
+    worker.blockedReason = blocked ? String(body.reason || "Blocked by a manager.") : null;
+    persist();
+    return null;
   },
   "/Access/insertworker": (body) => {
     const db = load();

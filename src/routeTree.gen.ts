@@ -25,6 +25,7 @@ import { Route as AppNotificationsRouteImport } from './routes/app/notifications
 import { Route as AppOverdueRouteImport } from './routes/app/overdue'
 import { Route as AppRequestsRouteImport } from './routes/app/requests'
 import { Route as AppRoomsRouteImport } from './routes/app/rooms'
+import { Route as AppSettingsRouteImport } from './routes/app/settings'
 import { Route as AppSitesRouteImport } from './routes/app/sites'
 import { Route as AppStaffRouteImport } from './routes/app/staff'
 import { Route as AppWorkersRouteImport } from './routes/app/workers'
@@ -111,6 +112,11 @@ const AppRoomsRoute = AppRoomsRouteImport.update({
   path: '/rooms',
   getParentRoute: () => AppRoute,
 } as any)
+const AppSettingsRoute = AppSettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => AppRoute,
+} as any)
 const AppSitesRoute = AppSitesRouteImport.update({
   id: '/sites',
   path: '/sites',
@@ -153,6 +159,7 @@ export interface FileRoutesByFullPath {
   '/app/overdue': typeof AppOverdueRoute
   '/app/requests': typeof AppRequestsRoute
   '/app/rooms': typeof AppRoomsRoute
+  '/app/settings': typeof AppSettingsRoute
   '/app/sites': typeof AppSitesRoute
   '/app/staff': typeof AppStaffRoute
   '/app/workers': typeof AppWorkersRoute
@@ -175,6 +182,7 @@ export interface FileRoutesByTo {
   '/app/overdue': typeof AppOverdueRoute
   '/app/requests': typeof AppRequestsRoute
   '/app/rooms': typeof AppRoomsRoute
+  '/app/settings': typeof AppSettingsRoute
   '/app/sites': typeof AppSitesRoute
   '/app/staff': typeof AppStaffRoute
   '/app/workers': typeof AppWorkersRoute
@@ -199,6 +207,7 @@ export interface FileRoutesById {
   '/app/overdue': typeof AppOverdueRoute
   '/app/requests': typeof AppRequestsRoute
   '/app/rooms': typeof AppRoomsRoute
+  '/app/settings': typeof AppSettingsRoute
   '/app/sites': typeof AppSitesRoute
   '/app/staff': typeof AppStaffRoute
   '/app/workers': typeof AppWorkersRoute
@@ -224,6 +233,7 @@ export interface FileRouteTypes {
     | '/app/overdue'
     | '/app/requests'
     | '/app/rooms'
+    | '/app/settings'
     | '/app/sites'
     | '/app/staff'
     | '/app/workers'
@@ -246,6 +256,7 @@ export interface FileRouteTypes {
     | '/app/overdue'
     | '/app/requests'
     | '/app/rooms'
+    | '/app/settings'
     | '/app/sites'
     | '/app/staff'
     | '/app/workers'
@@ -269,6 +280,7 @@ export interface FileRouteTypes {
     | '/app/overdue'
     | '/app/requests'
     | '/app/rooms'
+    | '/app/settings'
     | '/app/sites'
     | '/app/staff'
     | '/app/workers'
@@ -401,6 +413,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppRoomsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/settings': {
+      id: '/app/settings'
+      path: '/settings'
+      fullPath: '/app/settings'
+      preLoaderRoute: typeof AppSettingsRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/sites': {
       id: '/app/sites'
       path: '/sites'
@@ -449,6 +468,7 @@ interface AppRouteChildren {
   AppOverdueRoute: typeof AppOverdueRoute
   AppRequestsRoute: typeof AppRequestsRoute
   AppRoomsRoute: typeof AppRoomsRoute
+  AppSettingsRoute: typeof AppSettingsRoute
   AppSitesRoute: typeof AppSitesRoute
   AppStaffRoute: typeof AppStaffRoute
   AppWorkersRoute: typeof AppWorkersRoute
@@ -466,6 +486,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppOverdueRoute: AppOverdueRoute,
   AppRequestsRoute: AppRequestsRoute,
   AppRoomsRoute: AppRoomsRoute,
+  AppSettingsRoute: AppSettingsRoute,
   AppSitesRoute: AppSitesRoute,
   AppStaffRoute: AppStaffRoute,
   AppWorkersRoute: AppWorkersRoute,
@@ -487,12 +508,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { createStart } from '@tanstack/react-start'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-  }
-}

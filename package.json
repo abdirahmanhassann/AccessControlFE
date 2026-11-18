@@ -14,8 +14,8 @@
     "preview": "node scripts/with-app-env.mjs vite preview",
     "typecheck": "tsc --noEmit",
     "check:auth": "node scripts/check-auth-invariant.mjs",
-    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test src/lib/app-data/app-data.test.ts src/lib/auth/gate-identity.test.ts",
-    "test:e2e": "node --test --test-concurrency=1 e2e/keyman.e2e.mjs",
+    "test": "node --test 'scripts/**/*.test.mjs' && node --experimental-strip-types --test 'src/**/*.test.ts'",
+    "test:e2e": "node --test --test-concurrency=1 'e2e/*.e2e.mjs'",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

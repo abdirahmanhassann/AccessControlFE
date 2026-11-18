@@ -14,6 +14,7 @@ import {
   Menu,
   Network,
   ScrollText,
+  SlidersHorizontal,
   Users,
   Warehouse,
   X,
@@ -60,6 +61,7 @@ const NAV: NavItem[] = [
   { to: "/app/hours", label: "Blackout hours", icon: Clock3 },
   { to: "/app/notifications", label: "Inbox", icon: Bell },
   { to: "/app/audit", label: "Audit", icon: ScrollText },
+  { to: "/app/settings", label: "Settings", icon: SlidersHorizontal },
 ];
 
 export function ManagerShell({ children }: { children?: ReactNode }) {

@@ -145,7 +145,7 @@ export const apiPart1a = {
   setUserPassword: (token: string, data: { userId: number; password: string }) =>
     post("/Access/setuserpassword", dual({ token, ...data })),
   getWorkAreaManagers: (token: string) =>
-    post("/Access/getworkareamanagers", { token }).then(asArray),
+    post("/Access/getworkareamanagers", { token }).then(asArray<WorkAreaManager>),
   insertWorkAreaManager: (token: string, data: { workAreaId: number; managerUserId: number; isPrimary?: boolean }) =>
     post("/Access/insertworkareamanager", dual({ token, ...data, isPrimary: data.isPrimary ?? false })),
   updateWorkAreaManager: (token: string, data: WorkAreaManager) =>

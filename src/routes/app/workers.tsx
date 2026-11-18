@@ -6,7 +6,7 @@ import { useStaffData } from "@/lib/staff-data";
 import { useMounted } from "@/lib/use-mounted";
 import { prettyPhone } from "@/lib/format";
 import { api } from "@/lib/api/client";
-import type { Site, Worker, WorkerSiteMapping } from "@/lib/api/types";
+import { ApiError, type Site, type Worker, type WorkerSiteMapping } from "@/lib/api/types";
 
 export const Route = createFileRoute("/app/workers")({ component: WorkersPage });
 
@@ -14,8 +14,23 @@ function WorkersPage() {
   const mounted = useMounted();
   const [token, setToken] = useState<string>();
   const [edit, setEdit] = useState<Partial<Worker> | "new" | null>(null);
+  const [unblocking, setUnblocking] = useState<number | null>(null);
   useEffect(() => setToken(readSession()?.token), []);
   const { data, error, loading, reload } = useStaffData(token);
+
+  async function unblock(worker: Worker) {
+    if (!token) return;
+    setUnblocking(worker.id);
+    try {
+      await api.setWorkerBlock(token, { workerId: worker.id, blocked: false });
+      toast(`${worker.firstName} ${worker.lastName} unblocked`.trim());
+      await reload();
+    } catch (err) {
+      toast(err instanceof ApiError ? err.message : "Could not unblock that worker");
+    } finally {
+      setUnblocking(null);
+    }
+  }
 
   if (!mounted || loading || !data) return <PageSkeleton />;
 
@@ -38,6 +53,7 @@ function WorkersPage() {
               <th>Company</th>
               <th>Phone</th>
               <th>Status</th>
+              <th>Access</th>
             </tr>
           </thead>
           <tbody>
@@ -50,6 +66,23 @@ function WorkersPage() {
                 <td className="sg-mono">{prettyPhone(w.phoneNumber)}</td>
                 <td>
                   <Badge tone={w.isActive ? "ok" : "muted"}>{w.isActive ? "Active" : "Off"}</Badge>
+                </td>
+                <td onClick={(e) => e.stopPropagation()}>
+                  {w.blockedAt ? (
+                    <div style={{ display: "grid", gap: 6, justifyItems: "start" }}>
+                      <Badge tone="danger">Blocked</Badge>
+                      {w.blockedReason ? <div className="sg-muted">{w.blockedReason}</div> : null}
+                      <Button
+                        size="sm"
+                        disabled={unblocking === w.id}
+                        onClick={() => void unblock(w)}
+                      >
+                        {unblocking === w.id ? "Unblocking…" : "Unblock"}
+                      </Button>
+                    </div>
+                  ) : (
+                    <StrikeCount worker={w} />
+                  )}
                 </td>
               </tr>
             ))}
@@ -85,6 +118,15 @@ function WorkersPage() {
       ) : null}
     </div>
   );
+}
+
+/** What the worker has on their record, when they are not blocked yet. */
+function StrikeCount({ worker }: { worker: Worker }) {
+  const parts: string[] = [];
+  if (worker.overdueCount) parts.push(`${worker.overdueCount} late`);
+  if (worker.photoRejectedCount) parts.push(`${worker.photoRejectedCount} rejected`);
+  if (!parts.length) return <span className="sg-muted">Clear</span>;
+  return <span className="sg-muted">{parts.join(" · ")}</span>;
 }
 
 function WorkerForm({
