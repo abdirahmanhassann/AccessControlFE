@@ -23,6 +23,27 @@ jobs:
         with:
           fetch-depth: 0
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck, lint and unit tests
+        run: |
+          npm run typecheck
+          npm run lint
+          npm test
+
+      # The only tests that exercise the product itself: a real browser against
+      # the in-page demo API, so no API and no database are needed here.
+      - name: End-to-end tests
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+
       - name: Build the frontend image (same Dockerfile the server uses)
         run: docker build --build-arg VITE_API_BASE_URL=https://api.example.invalid -t ac-web-ci .
 

@@ -131,7 +131,14 @@ function RequestsPage() {
                       {workerLabel(data, r.workerId, approval || r)}
                     </Link>
                   </td>
-                  <td>{roomLabel(data, r.roomId)}</td>
+                  <td>
+                    {roomLabel(data, r.roomId)}
+                    {r.groupId && (r.groupSize ?? 1) > 1 ? (
+                      <span className="sg-help" style={{ display: "block" }}>
+                        1 of {r.groupSize} rooms in request #{r.groupId}
+                      </span>
+                    ) : null}
+                  </td>
                   <td>{r.workType}</td>
                   <td>
                     <Badge tone={statusTone(st)}>{st}</Badge>

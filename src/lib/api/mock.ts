@@ -1,5 +1,6 @@
 import {
   ApiError,
+  DAY_NAMES,
   type AccessPhoto,
   type AccessRequest,
   type AccessRequestApproval,
@@ -47,8 +48,25 @@ type Db = {
   /** Optional so demo data saved by an earlier build still loads. */
   roomLeaveReviews?: RoomLeaveReview[];
   settings?: Record<string, string>;
+  /** Multi-room requests and keys. Optional so older demo data still loads. */
+  groups?: MockGroup[];
+  keys?: MockKey[];
+  requestKeys?: MockRequestKey[];
   sessions: Session[];
   seq: Record<string, number>;
+};
+
+type MockGroup = { id: number; workerId: number; approverUserId: number; workTo: string | null; notifiedAt: string | null };
+type MockKey = { id: number; roomId: number; label: string; tagNumber: string; notes: string; isActive: boolean };
+type MockRequestKey = {
+  id: number;
+  accessRequestId: number;
+  keyId: number;
+  status: string;
+  returnBy: string | null;
+  issuedAt: string | null;
+  returnedAt: string | null;
+  note: string;
 };
 
 function iso(msOffset = 0) {
@@ -254,28 +272,9 @@ function seed(): Db {
 
   const departmentRoomMappings: DepartmentRoomMapping[] = [];
 
+  // Blackout hours: none by default, so the demo can request access at any time.
+  // (These used to be seeded as working hours, from before access windows became blackouts.)
   const windows: AccessWindow[] = [];
-  let wid = 1;
-  for (const area of workAreas) {
-    for (const day of [1, 2, 3, 4, 5]) {
-      windows.push({
-        id: wid++,
-        workAreaId: area.id,
-        dayOfWeek: day,
-        startTime: "07:00:00",
-        endTime: "18:00:00",
-        isActive: true,
-      });
-    }
-    windows.push({
-      id: wid++,
-      workAreaId: area.id,
-      dayOfWeek: 6,
-      startTime: "08:00:00",
-      endTime: "13:00:00",
-      isActive: true,
-    });
-  }
 
   const requests: AccessRequest[] = [
     {
@@ -624,7 +623,7 @@ function seed(): Db {
       departments: 7,
       departmentRoomMappings: 1,
       departmentManagerMappings: 8,
-      windows: wid,
+      windows: 1,
       requests: 7,
       approvals: 7,
       photos: 2,
@@ -978,6 +977,209 @@ function settingsOf(db: Db): Record<string, string> {
 
 const settingRows = (db: Db) =>
   Object.entries(settingsOf(db)).map(([name, value]) => ({ name, value }));
+
+// ---- multi-room requests and keys ---------------------------------------
+
+function overlaps(aFrom: string | null | undefined, aTo: string | null | undefined, bFrom: string | null, bTo: string | null) {
+  if (!aFrom || !aTo || !bFrom || !bTo) return false;
+  return Date.parse(aFrom) < Date.parse(bTo) && Date.parse(aTo) > Date.parse(bFrom);
+}
+
+function keyTaken(db: Db, keyId: number, from: string | null, to: string | null) {
+  return (db.requestKeys ?? []).some((k) => {
+    if (k.keyId !== keyId) return false;
+    if (k.status === "Issued") return true;
+    if (k.status !== "Requested" && k.status !== "Approved") return false;
+    const r = db.requests.find((x) => x.id === k.accessRequestId);
+    return overlaps(r?.workFrom, r?.workTo, from, to);
+  });
+}
+
+function keyRow(db: Db, k: MockKey, from: string | null = null, to: string | null = null) {
+  const room = db.rooms.find((r) => r.id === k.roomId);
+  const area = db.workAreas.find((a) => a.id === room?.workAreaId);
+  const out = (db.requestKeys ?? []).find((x) => x.keyId === k.id && x.status === "Issued");
+  const holder = out ? db.requests.find((r) => r.id === out.accessRequestId) : undefined;
+  const worker = holder ? db.workers.find((w) => w.id === holder.workerId) : undefined;
+  return {
+    ...k,
+    roomNumber: room?.roomNumber ?? "",
+    roomName: room?.name ?? "",
+    workAreaId: room?.workAreaId ?? 0,
+    workAreaName: area?.name ?? "",
+    siteId: area?.siteId ?? 0,
+    available: k.isActive && !keyTaken(db, k.id, from, to),
+    heldBy: worker ? `${worker.firstName} ${worker.lastName}` : "",
+  };
+}
+
+function requestKeyRow(db: Db, k: MockRequestKey) {
+  const key = (db.keys ?? []).find((x) => x.id === k.keyId);
+  const req = db.requests.find((r) => r.id === k.accessRequestId);
+  const room = db.rooms.find((r) => r.id === req?.roomId);
+  const area = db.workAreas.find((a) => a.id === room?.workAreaId);
+  const worker = db.workers.find((w) => w.id === req?.workerId);
+  return {
+    ...k,
+    groupId: req?.groupId ?? 0,
+    keyLabel: key?.label ?? "",
+    tagNumber: key?.tagNumber ?? "",
+    workerId: req?.workerId ?? 0,
+    workerFirstName: worker?.firstName ?? "",
+    workerLastName: worker?.lastName ?? "",
+    workerPhoneNumber: worker?.phoneNumber ?? "",
+    companyName: worker?.companyName ?? "",
+    roomId: req?.roomId ?? 0,
+    roomNumber: room?.roomNumber ?? "",
+    roomName: room?.name ?? "",
+    workAreaName: area?.name ?? "",
+    requestStatus: req?.status ?? "",
+    workFrom: req?.workFrom ?? null,
+    workTo: req?.workTo ?? null,
+    clockedInAt: req?.clockedInAt ?? null,
+    clockedOutAt: req?.clockedOutAt ?? null,
+  };
+}
+
+function groupRoomRows(db: Db, groupId: number) {
+  return db.requests
+    .filter((r) => r.groupId === groupId)
+    .sort((a, b) => a.id - b.id)
+    .map((r) => {
+      const room = db.rooms.find((x) => x.id === r.roomId);
+      const area = db.workAreas.find((a) => a.id === room?.workAreaId);
+      const worker = db.workers.find((w) => w.id === r.workerId);
+      const approval = db.approvals
+        .filter((a) => a.accessRequestId === r.id)
+        .sort((a, b) => b.id - a.id)[0];
+      return {
+        groupId,
+        accessRequestId: r.id,
+        workerId: r.workerId,
+        workerFirstName: worker?.firstName ?? "",
+        workerLastName: worker?.lastName ?? "",
+        workerPhoneNumber: worker?.phoneNumber ?? "",
+        roomId: r.roomId,
+        roomNumber: room?.roomNumber ?? "",
+        roomName: room?.name ?? "",
+        workAreaId: room?.workAreaId ?? 0,
+        workAreaName: area?.name ?? "",
+        status: r.status,
+        reason: r.reason,
+        workType: r.workType,
+        description: r.description,
+        supervisorName: r.supervisorName ?? "",
+        workFrom: r.workFrom ?? null,
+        workTo: r.workTo ?? null,
+        approvedAt: r.approvedAt,
+        rejectedAt: r.rejectedAt,
+        clockedInAt: r.clockedInAt,
+        clockedOutAt: r.clockedOutAt,
+        completedAt: r.completedAt,
+        approvalId: approval?.id ?? 0,
+        approverUserId: approval?.approverUserId ?? 0,
+        approvalStatus: approval?.status ?? "Pending",
+        comment: approval?.comment ?? "",
+        keyCount: (db.requestKeys ?? []).filter((k) => k.accessRequestId === r.id).length,
+      };
+    });
+}
+
+const hhmm = (t: string) => String(t ?? "").slice(0, 5);
+
+function windowsToday(db: Db, workAreaId: number, now = new Date()) {
+  const t = now.getHours() * 60 + now.getMinutes();
+  const mins = (v: string) => {
+    const [h, m] = hhmm(v).split(":").map(Number);
+    return (h || 0) * 60 + (m || 0);
+  };
+  return db.windows
+    .filter((w) => w.workAreaId === workAreaId && w.dayOfWeek === now.getDay() && w.isActive !== false)
+    .map((w) => {
+      const s = mins(w.startTime);
+      const e = mins(w.endTime);
+      const active = s <= e ? t >= s && t < e : t >= s || t < e;
+      return { start: hhmm(w.startTime), end: hhmm(w.endTime), active };
+    })
+    .sort((a, b) => a.start.localeCompare(b.start));
+}
+
+function blackoutMessage(db: Db, workAreaId: number) {
+  const hit = windowsToday(db, workAreaId).find((w) => w.active);
+  if (!hit) return "";
+  const day = DAY_NAMES[new Date().getDay()];
+  return `Access requests are closed for this area on ${day}s between ${hit.start} and ${hit.end}. Please try again after ${hit.end}.`;
+}
+
+type RoomInput = { roomId?: number; workAreaId?: number; roomText?: string; keyIds?: number[] };
+
+function roomInputs(body: Body): RoomInput[] {
+  const raw = (body.rooms ?? body.Rooms ?? []) as Array<Record<string, unknown>>;
+  return raw.map((r) => ({
+    roomId: Number(r.roomId ?? r.RoomId ?? 0),
+    workAreaId: Number(r.workAreaId ?? r.WorkAreaId ?? 0),
+    roomText: String(r.roomText ?? r.RoomText ?? "").trim(),
+    keyIds: ((r.keyIds ?? r.KeyIds ?? []) as unknown[]).map(Number).filter((n) => n > 0),
+  }));
+}
+
+function existingRoom(db: Db, input: RoomInput): Room | undefined {
+  if (input.roomId) {
+    const byId = db.rooms.find((r) => r.id === input.roomId);
+    if (byId) return byId;
+  }
+  const q = (input.roomText ?? "").toLowerCase();
+  if (!q) return undefined;
+  return db.rooms.find(
+    (r) =>
+      r.workAreaId === input.workAreaId &&
+      (r.roomNumber.toLowerCase() === q || r.name.toLowerCase() === q),
+  );
+}
+
+function notifyGroupDecided(db: Db, groupId: number) {
+  const group = (db.groups ?? []).find((g) => g.id === groupId);
+  if (!group || group.notifiedAt) return;
+  const rows = groupRoomRows(db, groupId);
+  if (!rows.length || rows.some((r) => r.status === "Pending")) return;
+  group.notifiedAt = iso();
+  const label = (r: { roomNumber: string; roomName: string }) => r.roomName || r.roomNumber;
+  const approved = rows.filter((r) => r.status === "Approved");
+  const declined = rows.filter((r) => r.status !== "Approved");
+  const keys = (db.requestKeys ?? [])
+    .filter((k) => rows.some((r) => r.accessRequestId === k.accessRequestId) && k.status === "Approved")
+    .map((k) => requestKeyRow(db, k));
+  let message = !declined.length
+    ? `Your access request is approved for ${approved.map(label).join(", ")}.`
+    : !approved.length
+      ? `Your access request was declined for ${declined.map((r) => (r.comment ? `${label(r)} (${r.comment})` : label(r))).join(", ")}.`
+      : `Your access request has been reviewed. Approved: ${approved.map(label).join(", ")}. Declined: ${declined.map((r) => (r.comment ? `${label(r)} (${r.comment})` : label(r))).join(", ")}.`;
+  const keyLine = (k: ReturnType<typeof requestKeyRow>) =>
+    `${k.keyLabel} for ${k.roomName || k.roomNumber}, return by ${k.returnBy ? new Date(k.returnBy).toLocaleString("en-GB", { hour: "2-digit", minute: "2-digit", weekday: "short", day: "numeric", month: "short" }) : "when you leave"}`;
+  if (keys.length) message += ` Collect from the Keyman: ${keys.map(keyLine).join("; ")}.`;
+  for (const r of rows) {
+    notify({
+      userId: null,
+      workerId: r.workerId,
+      accessRequestId: r.accessRequestId,
+      type: r.status === "Approved" ? "Approved" : "Rejected",
+      channel: "SMS",
+      message,
+    });
+  }
+  if (keys.length) {
+    for (const keyman of db.users.filter((u) => u.role === "Keyman" && u.isActive)) {
+      notify({
+        userId: keyman.id,
+        workerId: null,
+        accessRequestId: keys[0].accessRequestId,
+        type: "KeysToIssue",
+        channel: "IN_APP",
+        message: `Keys to hand out to ${keys[0].workerFirstName} ${keys[0].workerLastName}: ${keys.map(keyLine).join("; ")}.`,
+      });
+    }
+  }
+}
 
 const handlers: Record<string, (body: Body) => unknown> = {
   "/Access/login": (body) => {
@@ -1922,6 +2124,15 @@ const handlers: Record<string, (body: Body) => unknown> = {
       } else if (status === "Cancelled") {
         req.status = "Cancelled";
       }
+      if (req.groupId && /^(approved|rejected|cancelled)$/i.test(status)) {
+        for (const k of db.requestKeys ?? []) {
+          if (k.accessRequestId === req.id && k.status === "Requested") {
+            k.status = status === "Approved" ? "Approved" : "Rejected";
+            k.returnBy = req.workTo ?? k.returnBy;
+          }
+        }
+        notifyGroupDecided(db, req.groupId);
+      }
     }
     persist();
     return row;
@@ -2105,6 +2316,250 @@ const handlers: Record<string, (body: Body) => unknown> = {
     db.audits.unshift(row);
     persist();
     return row;
+  },
+
+  "/Access/checkrequestrooms": (body) => {
+    const db = load();
+    const rooms = roomInputs(body).map((input) => {
+      const room = existingRoom(db, input);
+      const workAreaId = room?.workAreaId ?? input.workAreaId ?? 0;
+      const message = blackoutMessage(db, workAreaId);
+      return {
+        roomId: room?.id ?? 0,
+        workAreaId,
+        workAreaName: db.workAreas.find((a) => a.id === workAreaId)?.name ?? "",
+        label: room ? locationDisplay(room) : input.roomText ?? "",
+        blocked: Boolean(message),
+        message,
+        windows: windowsToday(db, workAreaId),
+      };
+    });
+    return { rooms, anyBlocked: rooms.some((r) => r.blocked), allBlocked: rooms.every((r) => r.blocked) };
+  },
+  "/Access/insertaccessrequestgroup": (body) => {
+    const db0 = load();
+    const phone = digits(String(body.phoneNumber ?? body.PhoneNumber ?? ""));
+    let worker = db0.workers.find((w) => w.id === Number(body.workerId ?? body.WorkerId));
+    if (!worker && phone) worker = db0.workers.find((w) => digits(w.phoneNumber) === phone);
+    if (!worker) throw new ApiError(400, "Worker not found. Register first.");
+    const approverUserId = Number(body.approverUserId ?? body.ApproverUserId ?? 0);
+    if (!approverUserId) throw new ApiError(400, "A manager must be selected to approve this request.");
+    const inputs = roomInputs(body);
+    if (!inputs.length) throw new ApiError(400, "Add at least one room.");
+    const departmentId = Number(body.departmentId ?? body.DepartmentId ?? 0);
+    const workFrom = String(body.workFrom ?? body.WorkFrom ?? "") || null;
+    const workTo = String(body.workTo ?? body.WorkTo ?? "") || null;
+    const accepted: Array<{ room: Room; keyIds: number[] }> = [];
+    const skipped: Array<{ roomId: number; label: string; message: string; windows: unknown[] }> = [];
+    for (const input of inputs) {
+      const room = findOrCreateRoom(input.workAreaId ?? 0, input.roomText ?? "", input.roomId ?? 0);
+      ensureDepartmentRoomLink(departmentId, room.id);
+      if (accepted.some((a) => a.room.id === room.id)) continue;
+      const message = blackoutMessage(load(), room.workAreaId);
+      if (message) {
+        skipped.push({ roomId: room.id, label: locationDisplay(room), message, windows: windowsToday(load(), room.workAreaId) });
+        continue;
+      }
+      accepted.push({ room, keyIds: input.keyIds ?? [] });
+    }
+    if (!accepted.length) {
+      throw new ApiError(400, `All of these rooms are in blackout hours right now, so nothing was sent. ${skipped.map((s) => `${s.label}: ${s.message}`).join(" ")}`);
+    }
+    const db = load();
+    db.keys ??= [];
+    db.requestKeys ??= [];
+    db.groups ??= [];
+    for (const a of accepted) {
+      for (const keyId of a.keyIds) {
+        const key = db.keys.find((k) => k.id === keyId && k.roomId === a.room.id && k.isActive);
+        if (!key) throw new ApiError(400, `Key #${keyId} does not open that room.`);
+        if (keyTaken(db, keyId, workFrom, workTo)) {
+          throw new ApiError(400, `Key ${key.label} is already booked or out for that time. Choose another key or time.`);
+        }
+      }
+    }
+    const group: MockGroup = { id: nextId(db, "groups"), workerId: worker.id, approverUserId, workTo, notifiedAt: null };
+    db.groups.push(group);
+    const requests: Array<{ id: number; roomId: number; label: string }> = [];
+    for (const a of accepted) {
+      const area = db.workAreas.find((w) => w.id === a.room.workAreaId);
+      const req: AccessRequest = {
+        id: nextId(db, "requests"),
+        workerId: worker.id,
+        roomId: a.room.id,
+        status: "Pending",
+        reason: String(body.reason ?? body.Reason ?? ""),
+        workType: String(body.workType ?? body.WorkType ?? ""),
+        description: String(body.description ?? body.Description ?? ""),
+        phoneNumber: phone || worker.phoneNumber,
+        supervisorName: String(body.supervisorName ?? body.SupervisorName ?? ""),
+        workFrom,
+        workTo,
+        towerName: area?.name ?? "",
+        locationLabel: locationDisplay(a.room),
+        approvedAt: null,
+        rejectedAt: null,
+        clockedInAt: null,
+        expectedClockOutAt: workTo,
+        clockedOutAt: null,
+        completedAt: null,
+        createdAt: iso(),
+        groupId: group.id,
+      };
+      db.requests.unshift(req);
+      db.approvals.unshift({
+        id: nextId(db, "approvals"),
+        accessRequestId: req.id,
+        approverUserId,
+        status: "Pending",
+        comment: "",
+        createdAt: iso(),
+        reviewedAt: null,
+      });
+      for (const keyId of a.keyIds) {
+        db.requestKeys.push({
+          id: nextId(db, "requestKeys"),
+          accessRequestId: req.id,
+          keyId,
+          status: "Requested",
+          returnBy: workTo,
+          issuedAt: null,
+          returnedAt: null,
+          note: "",
+        });
+      }
+      audit({
+        accessRequestId: req.id,
+        workerId: worker.id,
+        userId: null,
+        eventType: "AccessRequested",
+        description: `${worker.firstName} ${worker.lastName} submitted access for ${locationDisplay(a.room)} (request group #${group.id}).`,
+        metadata: "",
+      });
+      requests.push({ id: req.id, roomId: a.room.id, label: locationDisplay(a.room) });
+    }
+    notify({
+      userId: approverUserId,
+      workerId: worker.id,
+      accessRequestId: requests[0].id,
+      type: "NewRequest",
+      channel: "InApp",
+      message: `${worker.firstName} ${worker.lastName} requested access to ${requests.map((r) => r.label).join(", ")}.`,
+    });
+    persist();
+    for (const r of db.requests) {
+      if (r.groupId === group.id) r.groupSize = requests.length;
+    }
+    persist();
+    return { groupId: group.id, id: requests[0].id, roomId: requests[0].roomId, requests, skipped };
+  },
+  "/Access/getaccessrequestgroup": (body) => {
+    const db = load();
+    const groupId = Number(body.groupId ?? body.GroupId ?? 0);
+    const rows = groupRoomRows(db, groupId);
+    if (!rows.length) throw new ApiError(404, "Request group not found.");
+    const keys = (db.requestKeys ?? [])
+      .filter((k) => rows.some((r) => r.accessRequestId === k.accessRequestId))
+      .map((k) => requestKeyRow(db, k));
+    return { groupId, rooms: rows, keys };
+  },
+  "/Access/getkeys": (body) => {
+    const db = load();
+    const id = Number(body.id ?? body.Id ?? 0);
+    const roomId = Number(body.roomId ?? body.RoomId ?? 0);
+    const workAreaId = Number(body.workAreaId ?? body.WorkAreaId ?? 0);
+    const siteId = Number(body.siteId ?? body.SiteId ?? 0);
+    const includeInactive = Boolean(body.includeInactive ?? body.IncludeInactive);
+    const from = (body.workFrom ?? body.WorkFrom ?? null) as string | null;
+    const to = (body.workTo ?? body.WorkTo ?? null) as string | null;
+    return (db.keys ?? [])
+      .filter((k) => includeInactive || k.isActive)
+      .map((k) => keyRow(db, k, from, to))
+      .filter((k) => (!id || k.id === id) && (!roomId || k.roomId === roomId) && (!workAreaId || k.workAreaId === workAreaId) && (!siteId || k.siteId === siteId));
+  },
+  "/Access/insertkey": (body) => {
+    requireStaff(body as { token?: string });
+    const db = load();
+    db.keys ??= [];
+    const roomId = Number(body.roomId ?? body.RoomId ?? 0);
+    const label = String(body.label ?? body.Label ?? "").trim();
+    if (!roomId || !label) throw new ApiError(400, "Choose the room and give the key a name.");
+    if (db.keys.some((k) => k.roomId === roomId && k.label.toLowerCase() === label.toLowerCase())) {
+      throw new ApiError(400, `That room already has a key called ${label}.`);
+    }
+    const key: MockKey = {
+      id: nextId(db, "keys"),
+      roomId,
+      label,
+      tagNumber: String(body.tagNumber ?? body.TagNumber ?? ""),
+      notes: String(body.notes ?? body.Notes ?? ""),
+      isActive: true,
+    };
+    db.keys.push(key);
+    persist();
+    return { id: key.id };
+  },
+  "/Access/updatekey": (body) => {
+    requireStaff(body as { token?: string });
+    const db = load();
+    const key = (db.keys ?? []).find((k) => k.id === Number(body.id ?? body.Id));
+    if (!key) throw new ApiError(404, "That key no longer exists.");
+    key.label = String(body.label ?? body.Label ?? key.label).trim();
+    key.tagNumber = String(body.tagNumber ?? body.TagNumber ?? "");
+    key.notes = String(body.notes ?? body.Notes ?? "");
+    key.isActive = Boolean(body.isActive ?? body.IsActive);
+    persist();
+    return null;
+  },
+  "/Access/getaccessrequestkeys": (body) => {
+    requireStaff(body as { token?: string });
+    const db = load();
+    const id = Number(body.id ?? body.Id ?? 0);
+    const accessRequestId = Number(body.accessRequestId ?? body.AccessRequestId ?? 0);
+    const groupId = Number(body.groupId ?? body.GroupId ?? 0);
+    const status = String(body.status ?? body.Status ?? "");
+    const outstanding = Boolean(body.outstanding ?? body.Outstanding);
+    return (db.requestKeys ?? [])
+      .map((k) => requestKeyRow(db, k))
+      .filter(
+        (k) =>
+          (!id || k.id === id) &&
+          (!accessRequestId || k.accessRequestId === accessRequestId) &&
+          (!groupId || k.groupId === groupId) &&
+          (!status || k.status === status) &&
+          (!outstanding || k.status === "Approved" || k.status === "Issued"),
+      );
+  },
+  "/Access/updateaccessrequestkey": (body) => {
+    const session = requireStaff(body as { token?: string });
+    if (session.user.role !== "Keyman" && session.user.role !== "Admin") {
+      throw new ApiError(403, "Only a Keyman can hand out or take back keys.");
+    }
+    const db = load();
+    const k = (db.requestKeys ?? []).find((x) => x.id === Number(body.id ?? body.Id));
+    if (!k) throw new ApiError(404, "That key booking no longer exists.");
+    const next = String(body.status ?? body.Status ?? "");
+    const allowed =
+      (next === "Issued" && k.status === "Approved") ||
+      (next === "Returned" && (k.status === "Issued" || k.status === "Missing")) ||
+      (next === "Missing" && k.status === "Issued");
+    if (!allowed) throw new ApiError(400, `This key cannot be marked ${next.toLowerCase()}: it is ${k.status.toLowerCase()}.`);
+    k.status = next;
+    if (next === "Issued") k.issuedAt = iso();
+    if (next === "Returned") k.returnedAt = iso();
+    const note = String(body.note ?? body.Note ?? "").trim();
+    if (note) k.note = note;
+    const row = requestKeyRow(db, k);
+    audit({
+      accessRequestId: k.accessRequestId,
+      workerId: row.workerId,
+      userId: session.user.id,
+      eventType: `Key${next}`,
+      description: `Key ${row.keyLabel} for ${row.roomName || row.roomNumber} ${next.toLowerCase()} (${row.workerFirstName} ${row.workerLastName}).`,
+      metadata: "",
+    });
+    persist();
+    return null;
   },
 };
 

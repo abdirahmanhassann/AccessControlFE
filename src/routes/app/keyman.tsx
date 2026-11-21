@@ -7,6 +7,7 @@ import {
   activeRequests,
   canReviewRoomLeave,
   displayStatus,
+  isManagerRole,
   roomLabel,
   useStaffData,
   visitSpan,
@@ -17,6 +18,7 @@ import { statusTone, timeRange, when, whenExact } from "@/lib/format";
 import { useMounted } from "@/lib/use-mounted";
 import { api } from "@/lib/api/client";
 import { SIDEBAR_REFRESH_EVENT } from "@/components/ManagerShell";
+import { KeymanKeys, RequestKeysCheck } from "@/components/KeymanKeys";
 import { ApiError, type AccessPhoto, type RoomLeaveReview, type Session } from "@/lib/api/types";
 
 export const Route = createFileRoute("/app/keyman")({ component: KeymanPage });
@@ -436,6 +438,13 @@ function KeymanPage() {
           </div>
         )}
       </section>
+
+      <KeymanKeys
+        token={token ?? ""}
+        data={data}
+        canAct={canReview}
+        canManage={isManagerRole(session?.user.role)}
+      />
     </div>
   );
 }
@@ -535,6 +544,8 @@ function ReviewCard({
             : "No photos on this visit (a manager may have signed the worker out)."}
         </p>
       )}
+
+      <RequestKeysCheck token={token} accessRequestId={review.accessRequestId} canAct={canReview} />
 
       {canReview ? (
         <>

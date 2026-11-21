@@ -165,6 +165,10 @@ export type AccessRequest = {
   workerFirstName?: string;
   workerLastName?: string;
   workerPhoneNumber?: string;
+  /** Set when this room is one of several in a single submission. */
+  groupId?: number | null;
+  /** Rooms in that submission (1 for a single-room request). */
+  groupSize?: number;
 };
 
 export type AccessRequestApproval = {
@@ -227,6 +231,122 @@ export type RoomLeaveReview = {
   clockedInAt?: string | null;
   clockedOutAt?: string | null;
   photoCount: number;
+};
+
+/** One room of a multi-room submission, with its latest approval. */
+export type GroupRoom = {
+  groupId: number;
+  accessRequestId: number;
+  workerId: number;
+  workerFirstName?: string;
+  workerLastName?: string;
+  workerPhoneNumber?: string;
+  roomId: number;
+  roomNumber: string;
+  roomName: string;
+  workAreaId: number;
+  workAreaName: string;
+  status: RequestStatus | string;
+  reason: string;
+  workType: string;
+  description: string;
+  supervisorName: string;
+  workFrom: string | null;
+  workTo: string | null;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+  clockedInAt: string | null;
+  clockedOutAt: string | null;
+  completedAt: string | null;
+  approvalId: number;
+  approverUserId: number;
+  approvalStatus: string;
+  comment: string;
+  keyCount: number;
+};
+
+/** A physical key. Each one opens a single room. */
+export type RoomKey = {
+  id: number;
+  roomId: number;
+  label: string;
+  tagNumber: string;
+  notes: string;
+  isActive: boolean;
+  roomNumber: string;
+  roomName: string;
+  workAreaId: number;
+  workAreaName: string;
+  siteId: number;
+  /** False when booked or out for the time frame asked about. */
+  available: boolean;
+  /** Worker holding it right now, when it is out. */
+  heldBy: string;
+};
+
+export type KeyStatus = "Requested" | "Approved" | "Rejected" | "Issued" | "Returned" | "Missing";
+
+/** A key asked for on one room of an access request, tracked until it is back. */
+export type AccessRequestKey = {
+  id: number;
+  accessRequestId: number;
+  groupId: number;
+  keyId: number;
+  keyLabel: string;
+  tagNumber: string;
+  status: KeyStatus | string;
+  returnBy: string | null;
+  issuedAt: string | null;
+  returnedAt: string | null;
+  note: string;
+  workerId: number;
+  workerFirstName: string;
+  workerLastName: string;
+  workerPhoneNumber: string;
+  companyName: string;
+  roomId: number;
+  roomNumber: string;
+  roomName: string;
+  workAreaName: string;
+  requestStatus: string;
+  workFrom: string | null;
+  workTo: string | null;
+  clockedInAt: string | null;
+  clockedOutAt: string | null;
+};
+
+export type RequestGroup = {
+  groupId: number;
+  rooms: GroupRoom[];
+  keys: AccessRequestKey[];
+};
+
+export type BlackoutWindow = { start: string; end: string; active: boolean };
+
+/** Blackout check for one room on the worker form. */
+export type RoomCheck = {
+  roomId: number;
+  workAreaId: number;
+  workAreaName: string;
+  label: string;
+  blocked: boolean;
+  message: string;
+  windows: BlackoutWindow[];
+};
+
+/** One room the worker is adding to a request. */
+export type GroupRoomInput = {
+  roomId?: number;
+  workAreaId: number;
+  roomText: string;
+  locationKind?: string;
+  keyIds?: number[];
+};
+
+export type GroupSubmitResult = {
+  groupId: number;
+  requests: Array<{ id: number; roomId: number; label: string }>;
+  skipped: Array<{ roomId: number; label: string; message: string; windows: BlackoutWindow[] }>;
 };
 
 export type OTPVerification = {

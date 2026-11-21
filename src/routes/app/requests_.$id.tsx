@@ -17,7 +17,9 @@ import { prettyPhone, statusTone, when, whenExact } from "@/lib/format";
 import { useMounted } from "@/lib/use-mounted";
 import { api } from "@/lib/api/client";
 import { ApiError } from "@/lib/api/types";
-import type { AccessRequest, AccessRequestApproval, RoomLeaveReview } from "@/lib/api/types";
+import { GroupRoomsCard, KeyList } from "@/components/GroupRoomsCard";
+import { announceKeysChanged, onKeysChanged } from "@/lib/keys";
+import type { AccessRequest, AccessRequestApproval, AccessRequestKey, RoomLeaveReview } from "@/lib/api/types";
 
 export const Route = createFileRoute("/app/requests_/$id")({ component: RequestDetail });
 
@@ -31,6 +33,9 @@ function RequestDetail() {
   const [fetched, setFetched] = useState<AccessRequest | null>(null);
   const [fetchedApprovals, setFetchedApprovals] = useState<AccessRequestApproval[]>([]);
   const [roomCheck, setRoomCheck] = useState<RoomLeaveReview | null>(null);
+  const [keys, setKeys] = useState<AccessRequestKey[]>([]);
+  const [keysTick, setKeysTick] = useState(0);
+  useEffect(() => onKeysChanged(() => setKeysTick((n) => n + 1)), []);
   useEffect(() => setToken(readSession()?.token), []);
   const { data, loading, reload, error } = useStaffData(token, { pollRequests: true });
 
@@ -66,6 +71,23 @@ function RequestDetail() {
       cancelled = true;
     };
   }, [token, id, data?.requests]);
+
+  // Keys asked for on this room.
+  useEffect(() => {
+    if (!token) return;
+    let cancelled = false;
+    api
+      .getAccessRequestKeys(token, { accessRequestId: Number(id) })
+      .then((rows) => {
+        if (!cancelled) setKeys(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setKeys([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token, id, data?.requests, keysTick]);
 
   const req = data?.requests.find((r) => r.id === Number(id)) ?? fetched;
 
@@ -104,6 +126,7 @@ function RequestDetail() {
         reviewedAt: localStamp(),
       });
       toast(status === "Approved" ? "Approved" : status === "Rejected" ? "Rejected" : "Cancelled");
+      announceKeysChanged();
       await reload();
     } catch (err) {
       toast(err instanceof ApiError ? err.message : "Could not update approval");
@@ -277,10 +300,26 @@ function RequestDetail() {
               ) : null}
             </section>
           ) : null}
+          {req.groupId && (req.groupSize ?? 1) > 1 ? (
+            <GroupRoomsCard groupId={req.groupId} currentRequestId={req.id} onChanged={reload} />
+          ) : null}
+          {keys.length ? (
+            <section className="sg-card" style={{ display: "grid", gap: 8 }}>
+              <h2>Keys for this room</h2>
+              <KeyList keys={keys} />
+              <p className="sg-help">
+                The Keyman hands keys out and takes them back on the <Link to="/app/keyman">Keyman</Link> page.
+              </p>
+            </section>
+          ) : null}
           {latest?.id ? (
             <section className="sg-card" style={{ display: "grid", gap: 12 }}>
               <h2>Decision</h2>
-              <p className="sg-muted">Approve to let them clock in at the gate. Reject with a comment if they should not enter.</p>
+              <p className="sg-muted">
+                {req.groupId && (req.groupSize ?? 1) > 1
+                  ? "This decision is for this room only. The worker hears once every room in the request has been decided."
+                  : "Approve to let them clock in at the gate. Reject with a comment if they should not enter."}
+              </p>
               <Field label="Comment to the worker">
                 <Textarea value={comment} onChange={(e) => setComment(e.target.value)} />
               </Field>

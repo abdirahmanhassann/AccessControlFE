@@ -1210,3 +1210,44 @@
     height: 320px;
   }
 }
+
+/* ---------- multi-room requests and keys ---------- */
+.sg-room-chip.is-warn {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+}
+.sg-room-chip.is-danger {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+.sg-room-chip-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sg-key-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-sm);
+}
+.sg-key-option input {
+  width: 18px;
+  height: 18px;
+}
+.sg-row-inline {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+}
+.sg-row-inline > :first-child {
+  flex: 1;
+}
+.sg-list-plain {
+  margin: 4px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+  font-size: var(--text-sm);
+}

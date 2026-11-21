@@ -181,6 +181,8 @@ export function asRequestRow(data: unknown): AccessRequest {
     workerFirstName: pickStr(row, ["workerFirstName"]),
     workerLastName: pickStr(row, ["workerLastName"]),
     workerPhoneNumber: pickStr(row, ["workerPhoneNumber"]),
+    groupId: pickNum(row, ["groupId"]) || null,
+    groupSize: pickNum(row, ["groupSize"]) || 1,
   };
 }
 

@@ -10,11 +10,11 @@ import {
   ShieldAlert,
   X,
 } from "lucide-react";
-import { BrandMark, Button, Field, Input, Select, Textarea, toast } from "@/components/ui";
+import { Badge, BrandMark, Button, Field, Input, Select, Textarea, toast } from "@/components/ui";
 import { CameraCapture } from "@/components/CameraCapture";
 import { QrImage } from "@/components/QrImage";
 import { api } from "@/lib/api/client";
-import { ApiError, PHOTO_TYPES, WORK_TYPES, type AccessRequest, type Department, type Room, type ScanQrResult, type Site, type User, type WorkArea } from "@/lib/api/types";
+import { ApiError, PHOTO_TYPES, WORK_TYPES, type AccessRequest, type AccessRequestKey, type Department, type GroupRoom, type GroupRoomInput, type Room, type RoomCheck, type RoomKey, type ScanQrResult, type Site, type User, type WorkArea } from "@/lib/api/types";
 import { compressImage } from "@/lib/image";
 import {
   writeWorkerSession,
@@ -493,7 +493,15 @@ function OtpStep() {
         room: attached || flow.room,
       });
       if (activePending) {
-        flow.set({ worker, request: activePending, mode: "waiting", step: "waiting" });
+        flow.set({
+          worker,
+          request: activePending,
+          groupId: activePending.groupId ?? 0,
+          groupRooms: [],
+          groupKeys: [],
+          mode: "waiting",
+          step: "waiting",
+        });
       } else if (openVisit) {
         // A worker who was part-way through signing out and had to re-verify
         // goes back to the sign-out screen, not to the start of the visit.
@@ -501,6 +509,9 @@ function OtpStep() {
         flow.set({
           worker,
           request: openVisit,
+          groupId: openVisit.groupId ?? 0,
+          groupRooms: [],
+          groupKeys: [],
           mode: signingOut ? "clockout" : "visit",
           step: signingOut ? "clockout" : "visit",
         });
@@ -590,6 +601,38 @@ function placeLabel(area: WorkArea, all: WorkArea[], sites: Site[]) {
   return `${siteName} · ${area.name}`;
 }
 
+/** A room the worker has added to the request, before it is sent. */
+type PendingRoom = {
+  key: string;
+  towerId: number;
+  roomId: number;
+  roomText: string;
+  locationKind: string;
+  label: string;
+  towerName: string;
+  keyIds: number[];
+};
+
+function toRoomInputs(list: PendingRoom[]): GroupRoomInput[] {
+  return list.map((r) => ({
+    roomId: r.roomId,
+    workAreaId: r.towerId,
+    roomText: r.roomText,
+    locationKind: r.locationKind,
+    keyIds: r.keyIds,
+  }));
+}
+
+function windowsText(check: RoomCheck) {
+  return check.windows.length
+    ? check.windows.map((w) => `${w.start}–${w.end}`).join(", ")
+    : "no blackout hours today";
+}
+
+function keyReturnText(key: AccessRequestKey) {
+  return key.returnBy ? `return by ${whenExact(key.returnBy)}` : "return when you leave";
+}
+
 function FormStep() {
   const flow = useWorkerFlow();
   const [form, setForm] = useState({
@@ -618,6 +661,9 @@ function FormStep() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [openVisit, setOpenVisit] = useState<AccessRequest | null>(null);
+  const [rooms, setRooms] = useState<PendingRoom[]>([]);
+  const [roomKeys, setRoomKeys] = useState<Record<number, RoomKey[]>>({});
+  const [blackout, setBlackout] = useState<{ checks: RoomCheck[]; all: boolean } | null>(null);
   const siteId = Number(form.siteId) || flow.siteId || flow.room?.siteId || 0;
   const matchedRoom = matchEnteredRoom(locations, form.roomText);
   const selectedSite = sites.find((s) => s.id === siteId);
@@ -704,7 +750,8 @@ function FormStep() {
       setForm((prev) => {
         const stillThere = prev.locationId && rows.some((r) => String(r.id) === prev.locationId);
         if (stillThere) return prev;
-        return { ...prev, locationId: "", roomText: prev.towerId === String(towerId) ? prev.roomText : "", approverUserId: "" };
+        // The manager belongs to the department, not the tower, so it is kept.
+        return { ...prev, locationId: "", roomText: prev.towerId === String(towerId) ? prev.roomText : "" };
       });
     }).catch(() => {
       if (!cancelled) setLocations([]);
@@ -721,7 +768,7 @@ function FormStep() {
   }, [matchedRoom?.id, form.roomText]);
 
   useEffect(() => {
-    const locationId = Number(form.locationId);
+    const locationId = rooms[0]?.roomId || Number(form.locationId);
     const departmentId = Number(form.departmentId);
     if (!departmentId) {
       setManagers([]);
@@ -745,7 +792,46 @@ function FormStep() {
     return () => {
       cancelled = true;
     };
-  }, [form.locationId, form.departmentId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.locationId, form.departmentId, rooms[0]?.roomId]);
+
+  // Keys for the rooms added so far, and whether each is free for the chosen time.
+  const workFromStamp = toDateTime(form.workDate, form.workFrom);
+  const workToStamp = toDateTime(form.workDate, form.workTo);
+  const roomIdsKey = rooms
+    .map((r) => r.roomId)
+    .filter(Boolean)
+    .join(",");
+  useEffect(() => {
+    const ids = roomIdsKey ? roomIdsKey.split(",").map(Number) : [];
+    if (!ids.length) {
+      setRoomKeys({});
+      return;
+    }
+    let cancelled = false;
+    void Promise.all(
+      ids.map((roomId) =>
+        api.getKeys({ roomId, workFrom: workFromStamp, workTo: workToStamp }).catch(() => [] as RoomKey[]),
+      ),
+    ).then((lists) => {
+      if (cancelled) return;
+      const next: Record<number, RoomKey[]> = {};
+      ids.forEach((id, i) => {
+        next[id] = lists[i];
+      });
+      setRoomKeys(next);
+      // A key that has since been booked by someone else is unticked.
+      setRooms((prev) =>
+        prev.map((r) => ({
+          ...r,
+          keyIds: r.keyIds.filter((k) => next[r.roomId]?.some((x) => x.id === k && x.available)),
+        })),
+      );
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [roomIdsKey, workFromStamp, workToStamp]);
 
   useEffect(() => {
     const workerId = flow.worker?.id;
@@ -774,9 +860,61 @@ function FormStep() {
   const selectedTower = towers.find((t) => String(t.id) === form.towerId);
   const selectedDepartment = departments.find((d) => String(d.id) === form.departmentId);
 
+  function currentRoomEntry(): PendingRoom | null {
+    const roomText = form.roomText.trim();
+    const towerId = Number(form.towerId);
+    if (!towerId || !roomText) return null;
+    const parsed = parseEnteredRoom(roomText);
+    const match = selectedLocation;
+    return {
+      key: `${towerId}:${match?.id ? `id${match.id}` : roomText.toLowerCase()}`,
+      towerId,
+      roomId: match?.id ?? 0,
+      roomText,
+      locationKind: parsed.locationKind,
+      label: match ? locationDisplay(match) : roomText,
+      towerName: selectedTower ? placeLabel(selectedTower, towers, sites) : "",
+      keyIds: [],
+    };
+  }
+
+  function addRoom() {
+    const entry = currentRoomEntry();
+    if (!entry) {
+      setError(form.towerId ? "Type the room first." : "Choose the site first.");
+      return;
+    }
+    setRooms((prev) => (prev.some((r) => r.key === entry.key) ? prev : [...prev, entry]));
+    setForm((prev) => ({ ...prev, roomText: "", locationId: "" }));
+    setBlackout(null);
+    setError("");
+  }
+
+  function removeRoom(key: string) {
+    setRooms((prev) => prev.filter((r) => r.key !== key));
+    setBlackout(null);
+  }
+
+  function toggleKey(roomKey: string, keyId: number, on: boolean) {
+    setRooms((prev) =>
+      prev.map((r) =>
+        r.key !== roomKey
+          ? r
+          : { ...r, keyIds: on ? [...new Set([...r.keyIds, keyId])] : r.keyIds.filter((k) => k !== keyId) },
+      ),
+    );
+  }
+
+  /** The rooms added, plus one still typed in the box but not added yet. */
+  function roomsToSend(): PendingRoom[] {
+    const typed = currentRoomEntry();
+    if (typed && !rooms.some((r) => r.key === typed.key)) return [...rooms, typed];
+    return rooms;
+  }
+
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!form.towerId) {
+    if (!form.towerId && !rooms.length) {
       setError("Choose the site.");
       return;
     }
@@ -784,12 +922,10 @@ function FormStep() {
       setError("Choose the department.");
       return;
     }
-    const roomText = form.roomText.trim();
-    const parsedRoom = parseEnteredRoom(roomText);
-    const roomId = selectedLocation?.id || Number(form.locationId) || 0;
+    const list = roomsToSend();
     const approverUserId = Number(form.approverUserId);
-    if (!roomText) {
-      setError("Enter the room — apartment number or riser, for example 13.2.");
+    if (!list.length) {
+      setError("Add the room — apartment number or riser, for example 13.2.");
       return;
     }
     if (!approverUserId) {
@@ -818,95 +954,149 @@ function FormStep() {
     setBusy(true);
     setError("");
     try {
-      const worker = await api.insertWorker({
-        firstName: form.firstName,
-        lastName: form.lastName,
-        phoneNumber: flow.phoneNumber,
-        companyName: form.companyName,
-      });
-      const existing = readWorkerSession();
-      if (existing) {
-        writeWorkerSession({
-          ...existing,
-          workerId: worker.id,
-          user: {
-            ...existing.user,
-            id: worker.id,
-            firstName: worker.firstName,
-            lastName: worker.lastName,
-            phoneNumber: worker.phoneNumber,
-          },
-        });
+      // Rooms in blackout hours right now: warn first, and send only the others.
+      const checks = await api.checkRequestRooms(siteId, toRoomInputs(list)).catch(() => [] as RoomCheck[]);
+      const blocked = checks.filter((c) => c.blocked);
+      if (checks.length && blocked.length === checks.length) {
+        setBlackout({ checks, all: true });
+        return;
       }
-      const workFrom = toDateTime(form.workDate, form.workFrom);
-      const workTo = toDateTime(form.workDate, form.workTo);
-      const request = await api.insertAccessRequest({
-        phoneNumber: flow.phoneNumber,
-        workerId: worker.id,
-        roomId,
-        workAreaId: Number(form.towerId),
-        siteId: Number(form.siteId) || siteId,
-        roomText,
-        departmentId: Number(form.departmentId),
-        locationKind: parsedRoom.locationKind,
-        reason: form.reason,
-        workType: form.workType,
-        description: form.description,
-        supervisorName: form.supervisorName,
-        workFrom,
-        workTo,
-        qrCodeIdentifier: flow.qrCodeIdentifier,
-        approverUserId,
-      });
-      const resolvedRoomId = request.roomId || roomId;
-      const picked = selectedLocation
-        ? {
-            ...selectedLocation,
-            id: resolvedRoomId || selectedLocation.id,
-            workAreaName: selectedTower?.name ?? "",
-            siteName: selectedSite?.name || flow.siteName,
-            siteId,
-            siteAddress: selectedSite?.address || flow.siteAddress,
-            scanKind: "room" as const,
-          }
-        : {
-            id: resolvedRoomId,
-            workAreaId: Number(form.towerId),
-            roomNumber: parsedRoom.roomNumber,
-            name: parsedRoom.name,
-            qrCodeIdentifier: flow.qrCodeIdentifier || "",
-            description: "",
-            isActive: true,
-            locationKind: parsedRoom.locationKind,
-            workAreaName: selectedTower?.name ?? "",
-            siteName: selectedSite?.name || flow.siteName,
-            siteId,
-            siteAddress: selectedSite?.address || flow.siteAddress,
-            scanKind: "room" as const,
-          };
-      const token = readWorkerSession()?.token;
-      if (token && request.id) {
-        try {
-          await api.insertApproval(token, {
-            accessRequestId: request.id,
-            approverUserId,
-            status: "Pending",
-            comment: "",
-          });
-        } catch {
-          /* backend may already insert the pending approval */
-        }
-        // No AccessRequested audit event from here: InsertAccessRequest writes
-        // one server-side, and writing a second from the browser put two rows
-        // in the audit trail for every request.
+      if (blocked.length) {
+        setBlackout({ checks, all: false });
+        return;
       }
-      flow.set({ worker, request, room: picked, mode: "waiting", step: "waiting" });
-      toast("Request sent. Waiting for a response.");
+      await send(list);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not submit.");
     } finally {
       setBusy(false);
     }
+  }
+
+  async function sendRemaining() {
+    setBusy(true);
+    setError("");
+    try {
+      await send(roomsToSend());
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not submit.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function send(list: PendingRoom[]) {
+    const approverUserId = Number(form.approverUserId);
+    const worker = await api.insertWorker({
+      firstName: form.firstName,
+      lastName: form.lastName,
+      phoneNumber: flow.phoneNumber,
+      companyName: form.companyName,
+    });
+    const existing = readWorkerSession();
+    if (existing) {
+      writeWorkerSession({
+        ...existing,
+        workerId: worker.id,
+        user: {
+          ...existing.user,
+          id: worker.id,
+          firstName: worker.firstName,
+          lastName: worker.lastName,
+          phoneNumber: worker.phoneNumber,
+        },
+      });
+    }
+    const workFrom = toDateTime(form.workDate, form.workFrom);
+    const workTo = toDateTime(form.workDate, form.workTo);
+    const result = await api.insertAccessRequestGroup({
+      phoneNumber: flow.phoneNumber,
+      workerId: worker.id,
+      siteId: Number(form.siteId) || siteId,
+      departmentId: Number(form.departmentId),
+      rooms: toRoomInputs(list),
+      reason: form.reason,
+      workType: form.workType,
+      description: form.description,
+      supervisorName: form.supervisorName,
+      workFrom,
+      workTo,
+      approverUserId,
+    });
+    const first = result.requests[0];
+    if (!first?.id) throw new ApiError(500, "Could not submit.");
+    const token = readWorkerSession()?.token;
+    const rows = await api
+      .getAccessRequests(token, { id: first.id, workerId: worker.id, take: 1 })
+      .catch(() => [] as AccessRequest[]);
+    const request: AccessRequest = rows.find((r) => r.id === first.id) ?? {
+      id: first.id,
+      workerId: worker.id,
+      roomId: first.roomId,
+      status: "Pending",
+      reason: form.reason,
+      workType: form.workType,
+      description: form.description,
+      supervisorName: form.supervisorName,
+      workFrom,
+      workTo,
+      approvedAt: null,
+      rejectedAt: null,
+      clockedInAt: null,
+      expectedClockOutAt: workTo,
+      clockedOutAt: null,
+      completedAt: null,
+      createdAt: localStamp(),
+      groupId: result.groupId,
+      groupSize: result.requests.length,
+    };
+    const firstRoom = list.find((r) => r.roomId === first.roomId) ?? list[0];
+    const firstTower = towers.find((t) => t.id === firstRoom.towerId);
+    const knownRoom = locations.find((r) => r.id === first.roomId);
+    const parsed = parseEnteredRoom(firstRoom.roomText);
+    const picked: ScanQrResult = knownRoom
+      ? {
+          ...knownRoom,
+          workAreaName: firstTower?.name ?? "",
+          siteName: selectedSite?.name || flow.siteName,
+          siteId,
+          siteAddress: selectedSite?.address || flow.siteAddress,
+          scanKind: "room",
+        }
+      : {
+          id: first.roomId,
+          workAreaId: firstRoom.towerId,
+          roomNumber: parsed.roomNumber,
+          name: parsed.name,
+          qrCodeIdentifier: flow.qrCodeIdentifier || "",
+          description: "",
+          isActive: true,
+          locationKind: parsed.locationKind,
+          workAreaName: firstTower?.name ?? "",
+          siteName: selectedSite?.name || flow.siteName,
+          siteId,
+          siteAddress: selectedSite?.address || flow.siteAddress,
+          scanKind: "room",
+        };
+    flow.set({
+      worker,
+      request,
+      groupId: result.groupId,
+      groupRooms: [],
+      groupKeys: [],
+      room: picked,
+      mode: "waiting",
+      step: "waiting",
+    });
+    setBlackout(null);
+    const count = result.requests.length;
+    toast(
+      result.skipped.length
+        ? `Request sent for ${count} room${count === 1 ? "" : "s"}. ${result.skipped.length} in blackout hours ${result.skipped.length === 1 ? "was" : "were"} left out.`
+        : count > 1
+          ? `Request sent for ${count} rooms. Waiting for a response.`
+          : "Request sent. Waiting for a response.",
+    );
   }
 
   return (
@@ -932,7 +1122,9 @@ function FormStep() {
             <Button
               type="button"
               variant="primary"
-              onClick={() => flow.set({ request: openVisit, mode: "visit", step: "visit" })}
+              onClick={() =>
+                flow.set({ request: openVisit, groupId: openVisit.groupId ?? 0, groupRooms: [], groupKeys: [], mode: "visit", step: "visit" })
+              }
             >
               Clock in / sign out
             </Button>
@@ -1011,17 +1203,21 @@ function FormStep() {
           value={form.towerId}
           onChange={(e) => {
             const tower = towers.find((t) => String(t.id) === e.target.value);
+            const sameSite = Boolean(tower) && String(tower?.siteId) === form.siteId;
+            // Rooms from several towers of one site can go in one request; a different site starts again.
+            if (!sameSite) setRooms([]);
+            setBlackout(null);
             setForm({
               ...form,
               towerId: e.target.value,
               siteId: tower ? String(tower.siteId) : "",
-              departmentId: "",
+              departmentId: sameSite ? form.departmentId : "",
               locationId: "",
               roomText: "",
-              approverUserId: "",
+              approverUserId: sameSite ? form.approverUserId : "",
             });
           }}
-          required
+          required={!rooms.length}
         >
           <option value="">Select site</option>
           {towers.map((t) => (
@@ -1056,7 +1252,7 @@ function FormStep() {
         </Select>
       </Field>
       <Field
-        label="Room"
+        label={rooms.length ? "Add another room" : "Room"}
         hint={
           !form.towerId
             ? "Choose a site first."
@@ -1064,18 +1260,29 @@ function FormStep() {
               ? locationDisplay(selectedLocation)
               : form.roomText.trim()
                 ? "Not in the list yet — we will add it to this site when you submit."
-                : "Type the apartment or riser number, for example 13.2 or E2.00.21."
+                : "Type the apartment or riser number, for example 13.2 or E2.00.21. Add as many rooms as you need."
         }
       >
-        <Input
-          value={form.roomText}
-          list="sg-tower-rooms"
-          onChange={(e) => setForm({ ...form, roomText: e.target.value })}
-          placeholder="e.g. 13.2"
-          required
-          disabled={!form.towerId}
-          autoComplete="off"
-        />
+        <div className="sg-row-inline">
+          <Input
+            value={form.roomText}
+            list="sg-tower-rooms"
+            onChange={(e) => setForm({ ...form, roomText: e.target.value })}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                addRoom();
+              }
+            }}
+            placeholder="e.g. 13.2"
+            required={!rooms.length}
+            disabled={!form.towerId}
+            autoComplete="off"
+          />
+          <Button type="button" onClick={addRoom} disabled={!form.towerId || !form.roomText.trim()}>
+            Add room
+          </Button>
+        </div>
       </Field>
       <datalist id="sg-tower-rooms">
         {locations.map((r) => (
@@ -1084,6 +1291,46 @@ function FormStep() {
           </option>
         ))}
       </datalist>
+      {rooms.length ? (
+        <div className="sg-room-grid">
+          {rooms.map((r) => {
+            const keys = r.roomId ? roomKeys[r.roomId] ?? [] : [];
+            return (
+              <div className="sg-room-chip" key={r.key}>
+                <div className="sg-room-chip-head">
+                  <strong>{r.label}</strong>
+                  <Button type="button" onClick={() => removeRoom(r.key)}>
+                    Remove
+                  </Button>
+                </div>
+                {r.towerName ? <small>{r.towerName}</small> : null}
+                {keys.length ? (
+                  <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+                    <small>Keys you need for this room</small>
+                    {keys.map((k) => (
+                      <label className="sg-key-option" key={k.id}>
+                        <input
+                          type="checkbox"
+                          checked={r.keyIds.includes(k.id)}
+                          disabled={!k.available}
+                          onChange={(e) => toggleKey(r.key, k.id, e.target.checked)}
+                        />
+                        <span>
+                          {k.label}
+                          {k.tagNumber ? ` (${k.tagNumber})` : ""}
+                          {k.available ? "" : " — already booked or out for that time"}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                ) : r.roomId ? null : (
+                  <small>New room: no keys are registered for it yet.</small>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      ) : null}
       <Field label="What are you doing?">
         <Textarea
           value={form.description}
@@ -1117,14 +1364,47 @@ function FormStep() {
           ))}
         </Select>
       </Field>
-      <Button variant="primary" block disabled={busy || !form.approverUserId} type="submit">
-        {busy ? "Submitting…" : "Submit form"}
+      {blackout ? (
+        <div className={`sg-room-chip ${blackout.all ? "is-danger" : "is-warn"}`} role="alert">
+          <strong>
+            {blackout.all
+              ? "All of these rooms are in blackout hours right now"
+              : "Some of these rooms are in blackout hours right now"}
+          </strong>
+          <small>
+            {blackout.all
+              ? "Nothing can be sent until a blackout ends. Blackout hours for each room today:"
+              : "Only the rooms not within their blackout hours will go through. Blackout hours for each room today:"}
+          </small>
+          <ul className="sg-list-plain">
+            {blackout.checks.map((c, i) => (
+              <li key={`${c.roomId}-${i}`}>
+                <strong>{c.label}</strong>
+                {c.workAreaName ? ` (${c.workAreaName})` : ""}: {windowsText(c)}{" "}
+                {c.blocked ? <Badge tone="danger">In blackout now</Badge> : <Badge tone="ok">Will be sent</Badge>}
+              </li>
+            ))}
+          </ul>
+          <div className="sg-actions" style={{ marginTop: 8 }}>
+            {blackout.all ? null : (
+              <Button type="button" variant="primary" disabled={busy} onClick={() => void sendRemaining()}>
+                {busy ? "Submitting…" : `Send for the other ${blackout.checks.filter((c) => !c.blocked).length} room(s)`}
+              </Button>
+            )}
+            <Button type="button" onClick={() => setBlackout(null)}>
+              Change rooms
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      <Button variant="primary" block disabled={busy || !form.approverUserId || Boolean(blackout)} type="submit">
+        {busy ? "Submitting…" : rooms.length > 1 ? `Submit request for ${roomsToSend().length} rooms` : "Submit form"}
       </Button>
     </form>
   );
 }
 
-function WaitingStep() {
+function SingleWaitingStep() {
   const flow = useWorkerFlow();
   const [status, setStatus] = useState(flow.request?.status ?? "Pending");
   const [comment, setComment] = useState("");
@@ -1210,12 +1490,241 @@ function WaitingStep() {
   );
 }
 
+function WaitingStep() {
+  const flow = useWorkerFlow();
+  const groupId = flow.groupId || flow.request?.groupId || 0;
+  return groupId ? <GroupWaitingStep groupId={groupId} /> : <SingleWaitingStep />;
+}
+
+function statusTone(status: string): "ok" | "warn" | "danger" | "accent" | "muted" {
+  if (/^approved$/i.test(status)) return "ok";
+  if (/^(rejected|cancelled)$/i.test(status)) return "danger";
+  if (/^completed$/i.test(status)) return "accent";
+  return "warn";
+}
+
+function roomName(r: { roomName?: string; roomNumber?: string }) {
+  return r.roomName || r.roomNumber || "Room";
+}
+
+/** Load the worker's group into the flow. */
+async function loadGroup(groupId: number, workerId: number) {
+  const token = readWorkerSession()?.token;
+  return api.getAccessRequestGroup(token, groupId, workerId);
+}
+
+function GroupWaitingStep({ groupId }: { groupId: number }) {
+  const flow = useWorkerFlow();
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    let stop = false;
+    async function poll() {
+      try {
+        const token = readWorkerSession()?.token;
+        const workerId = flow.worker?.id || flow.request?.workerId || 0;
+        const group = await loadGroup(groupId, workerId);
+        if (stop) return;
+        flow.set({ groupId, groupRooms: group.rooms, groupKeys: group.keys });
+        if (group.rooms.some((r) => /^pending$/i.test(String(r.status)))) return;
+
+        // Every room is decided: the worker gets one message for the whole request.
+        if (token) {
+          try {
+            const ids = new Set(group.rooms.map((r) => r.accessRequestId));
+            const notes = await api.getNotifications(token);
+            const hit = notes.find(
+              (n) => n.accessRequestId != null && ids.has(n.accessRequestId) && /^(approved|rejected)$/i.test(n.type),
+            );
+            if (hit && !stop) setMessage(hit.message);
+          } catch {
+            /* optional */
+          }
+        }
+        const approved = group.rooms.find((r) => /^approved$/i.test(String(r.status)));
+        if (approved && !stop) {
+          const rows = await api
+            .getAccessRequests(token, { id: approved.accessRequestId, workerId: workerId || undefined, take: 1 })
+            .catch(() => [] as AccessRequest[]);
+          const row = rows.find((r) => r.id === approved.accessRequestId);
+          flow.set({ request: row ?? flow.request, mode: "visit", step: "visit" });
+        }
+      } catch {
+        /* keep waiting */
+      }
+    }
+    void poll();
+    const id = window.setInterval(() => void poll(), 10000);
+    return () => {
+      stop = true;
+      window.clearInterval(id);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupId]);
+
+  const rooms = flow.groupRooms.filter((r) => r.groupId === groupId);
+  const decided = rooms.length > 0 && !rooms.some((r) => /^pending$/i.test(String(r.status)));
+  const allDeclined = decided && rooms.every((r) => !/^approved$/i.test(String(r.status)));
+
+  const list = rooms.length ? (
+    <ul className="sg-list-plain" style={{ textAlign: "left" }}>
+      {rooms.map((r) => (
+        <li key={r.accessRequestId}>
+          <strong>{roomName(r)}</strong>
+          {r.workAreaName ? ` (${r.workAreaName})` : ""}{" "}
+          <Badge tone={statusTone(String(r.status))}>{String(r.status)}</Badge>
+          {r.comment && !/^approved$/i.test(String(r.status)) ? <div className="sg-help">{r.comment}</div> : null}
+        </li>
+      ))}
+    </ul>
+  ) : null;
+
+  if (allDeclined) {
+    return (
+      <div className="sg-status-hero">
+        <div className="icon-wrap" style={{ background: "var(--danger-soft)", color: "var(--danger)" }}>
+          <X size={28} />
+        </div>
+        <h1>Request declined</h1>
+        <p className="sg-muted">{message || "The site manager declined this visit."}</p>
+        {list}
+        <Button
+          variant="primary"
+          onClick={() => flow.set({ step: "form", request: null, groupId: 0, groupRooms: [], groupKeys: [] })}
+        >
+          Submit a new request
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="sg-status-hero">
+      <div className="icon-wrap">
+        <Hourglass size={28} />
+      </div>
+      <h1>Waiting for approval</h1>
+      <p className="sg-muted">
+        {rooms.length > 1
+          ? `Your request for ${rooms.length} rooms is with the manager. Each room is approved or declined on its own; you will get one SMS when they have all been reviewed.`
+          : `Your request for ${locationDisplay(flow.room) || flow.siteName || "this location"} is with the manager. Stay on site — you will get an SMS when it is reviewed.`}
+      </p>
+      {list}
+      <p className="sg-help">
+        Demo: open the{" "}
+        <Link to="/login" style={{ textDecoration: "underline" }}>
+          manager console
+        </Link>{" "}
+        as james.cole@sitegate.demo, approve this request, then come back here.
+      </p>
+    </div>
+  );
+}
+
+/** One approved room of the visit, from the group or (older requests) the single request. */
+type VisitRoom = {
+  accessRequestId: number;
+  roomId: number;
+  label: string;
+  workerId: number;
+  reason: string;
+  workType: string;
+  description: string;
+  clockedInAt: string | null;
+  clockedOutAt: string | null;
+  completedAt: string | null;
+};
+
+function useVisitRooms(): VisitRoom[] {
+  const flow = useWorkerFlow();
+  const groupId = flow.groupId || flow.request?.groupId || 0;
+  const fromGroup = groupId
+    ? flow.groupRooms.filter(
+        (r: GroupRoom) => r.groupId === groupId && (/^(approved|completed)$/i.test(String(r.status)) || r.clockedInAt),
+      )
+    : [];
+  if (fromGroup.length) {
+    return fromGroup.map((r) => ({
+      accessRequestId: r.accessRequestId,
+      roomId: r.roomId,
+      label: `${roomName(r)}${r.workAreaName ? ` · ${r.workAreaName}` : ""}`,
+      workerId: r.workerId,
+      reason: r.reason,
+      workType: r.workType,
+      description: r.description,
+      clockedInAt: r.clockedInAt,
+      clockedOutAt: r.clockedOutAt,
+      completedAt: r.completedAt,
+    }));
+  }
+  const q = flow.request;
+  if (!q) return [];
+  return [
+    {
+      accessRequestId: q.id,
+      roomId: q.roomId,
+      label: locationDisplay(flow.room) || q.locationLabel || q.roomName || q.roomNumber || "Room",
+      workerId: q.workerId,
+      reason: q.reason,
+      workType: q.workType,
+      description: q.description,
+      clockedInAt: q.clockedInAt,
+      clockedOutAt: q.clockedOutAt,
+      completedAt: q.completedAt,
+    },
+  ];
+}
+
+/** Loads the group when a visit is resumed (after re-verifying) and the rooms are not in memory yet. */
+function useEnsureGroupLoaded() {
+  const flow = useWorkerFlow();
+  const groupId = flow.groupId || flow.request?.groupId || 0;
+  const loaded = flow.groupRooms.some((r) => r.groupId === groupId);
+  useEffect(() => {
+    if (!groupId || loaded) return;
+    let cancelled = false;
+    void loadGroup(groupId, flow.worker?.id || flow.request?.workerId || 0)
+      .then((group) => {
+        if (!cancelled) flow.set({ groupId, groupRooms: group.rooms, groupKeys: group.keys });
+      })
+      .catch(() => {
+        /* the single request still works */
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [groupId, loaded]);
+}
+
+function KeysPanel({ keys, leaving }: { keys: AccessRequestKey[]; leaving?: boolean }) {
+  const open = keys.filter((k) => /^(approved|issued|missing)$/i.test(String(k.status)));
+  if (!open.length) return null;
+  return (
+    <div className="sg-room-chip">
+      <strong>{leaving ? "Return your keys to the Keyman" : "Keys"}</strong>
+      <ul className="sg-list-plain">
+        {open.map((k) => (
+          <li key={k.id}>
+            <strong>{k.keyLabel}</strong> for {k.roomName || k.roomNumber} —{" "}
+            {/^approved$/i.test(String(k.status)) ? "collect from the Keyman, " : ""}
+            {keyReturnText(k)}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 function VisitStep() {
   const flow = useWorkerFlow();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [session, refreshSession] = useWorkerSession();
-  const clockedIn = Boolean(flow.request?.clockedInAt);
+  useEnsureGroupLoaded();
+  const rooms = useVisitRooms();
+  const open = rooms.filter((r) => !r.completedAt && !r.clockedOutAt);
+  const clockedIn = open.length > 0 && open.every((r) => Boolean(r.clockedInAt));
   const expected = flow.request?.workTo || flow.request?.expectedClockOutAt;
   const expired = flow.request ? windowEnded(flow.request) : false;
 
@@ -1235,12 +1744,12 @@ function VisitStep() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flow.request?.roomId, flow.siteId, flow.room?.id]);
 
+  /** One clock-in covers every approved room of the request. */
   async function clockIn() {
-    if (!flow.request) {
+    if (!flow.request || !open.length) {
       setError("No approved visit found.");
       return;
     }
-    const workerId = flow.request.workerId || flow.worker?.id || 0;
     // Check the verification here rather than letting the call go out anyway:
     // `updateAccessRequest` accepts a tokenless clock-in, which would hide a
     // lapsed session until the worker tried to sign out at the end of the
@@ -1259,37 +1768,41 @@ function VisitStep() {
     setError("");
     try {
       const now = new Date();
+      const stamp = localStamp(now);
       const expectedOut =
         flow.request.expectedClockOutAt || localStamp(new Date(now.getTime() + 8 * 60 * 60 * 1000));
-      await api.updateAccessRequest(token, {
-        id: flow.request.id,
-        workerId,
-        roomId: flow.request.roomId,
-        status: "Approved",
-        reason: flow.request.reason,
-        workType: flow.request.workType,
-        description: flow.request.description,
-        clockedInAt: localStamp(now),
-        expectedClockOutAt: expectedOut.slice(0, 19),
-      });
-      try {
-        await api.insertAudit(token, {
-          accessRequestId: flow.request.id,
+      for (const room of open.filter((r) => !r.clockedInAt)) {
+        const workerId = room.workerId || flow.worker?.id || 0;
+        await api.updateAccessRequest(token, {
+          id: room.accessRequestId,
           workerId,
-          eventType: "ClockedIn",
-          description: `${flow.worker?.firstName ?? "Worker"} ${flow.worker?.lastName ?? ""} clocked in at ${locationDisplay(flow.room)}.`,
+          roomId: room.roomId,
+          status: "Approved",
+          reason: room.reason,
+          workType: room.workType,
+          description: room.description,
+          clockedInAt: stamp,
+          expectedClockOutAt: expectedOut.slice(0, 19),
         });
-      } catch {
-        /* audit is best-effort */
+        try {
+          await api.insertAudit(token, {
+            accessRequestId: room.accessRequestId,
+            workerId,
+            eventType: "ClockedIn",
+            description: `${flow.worker?.firstName ?? "Worker"} ${flow.worker?.lastName ?? ""} clocked in at ${room.label}.`,
+          });
+        } catch {
+          /* audit is best-effort */
+        }
       }
+      const ids = new Set(open.map((r) => r.accessRequestId));
       flow.set({
-        request: {
-          ...flow.request,
-          clockedInAt: localStamp(now),
-          expectedClockOutAt: expectedOut,
-        },
+        request: { ...flow.request, clockedInAt: stamp, expectedClockOutAt: expectedOut },
+        groupRooms: flow.groupRooms.map((r) =>
+          ids.has(r.accessRequestId) && !r.clockedInAt ? { ...r, clockedInAt: stamp } : r,
+        ),
       });
-      toast("Clocked in");
+      toast(open.length > 1 ? `Clocked in to ${open.length} rooms` : "Clocked in");
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not clock in.");
     } finally {
@@ -1297,24 +1810,43 @@ function VisitStep() {
     }
   }
 
+  const declined = flow.groupRooms.filter(
+    (r) => r.groupId === (flow.groupId || flow.request?.groupId) && /^(rejected|cancelled)$/i.test(String(r.status)),
+  );
+
   return (
     <div className="sg-form-grid">
       <h1>{clockedIn ? "You are on site" : "Approved visit"}</h1>
       <p className="sg-muted">
-        {locationDisplay(flow.room) || flow.request?.locationLabel || flow.siteName}. Clock in when you enter, then sign out when you leave.
+        {rooms.length > 1
+          ? `Approved for ${rooms.length} rooms. Clock in once when you arrive, then sign out once when you leave.`
+          : `${locationDisplay(flow.room) || flow.request?.locationLabel || flow.siteName}. Clock in when you enter, then sign out when you leave.`}
       </p>
-      {flow.room ? (
+      {rooms.length > 1 ? (
         <div className="sg-room-chip">
-          <strong>
-            {locationDisplay(flow.room)}
-          </strong>
+          <strong>Approved rooms</strong>
+          <ul className="sg-list-plain">
+            {rooms.map((r) => (
+              <li key={r.accessRequestId}>{r.label}</li>
+            ))}
+          </ul>
+          {declined.length ? (
+            <small>
+              Not approved: {declined.map((r) => `${roomName(r)}${r.comment ? ` (${r.comment})` : ""}`).join(", ")}
+            </small>
+          ) : null}
+        </div>
+      ) : flow.room ? (
+        <div className="sg-room-chip">
+          <strong>{locationDisplay(flow.room)}</strong>
           <small>{flow.room?.workAreaName ? `${flow.room.workAreaName} · ${flow.siteName}` : flow.room?.description}</small>
         </div>
       ) : null}
+      <KeysPanel keys={flow.groupKeys} />
       {clockedIn ? (
         <div className="sg-room-chip">
           <strong>Clocked in</strong>
-          <small>{whenExact(flow.request?.clockedInAt)}</small>
+          <small>{whenExact(open[0]?.clockedInAt || flow.request?.clockedInAt)}</small>
         </div>
       ) : null}
       {expected ? <p className="sg-help">Expected clock out {whenExact(expected)}</p> : null}
@@ -1329,35 +1861,45 @@ function VisitStep() {
       <Button
         variant="primary"
         block
-        disabled={busy || clockedIn || !session || expired}
+        disabled={busy || clockedIn || !session || expired || !open.length}
         onClick={() => void clockIn()}
       >
         {busy ? "Clocking in…" : clockedIn ? "Already clocked in" : "Clock in"}
       </Button>
       <Button
         block
-        disabled={busy || !session || expired}
+        disabled={busy || !session || expired || !open.length}
         onClick={() => flow.set({ mode: "clockout", step: "clockout" })}
       >
         Sign out
       </Button>
-      <Button type="button" onClick={() => flow.set({ step: "form", request: null, mode: "request" })}>
+      <Button
+        type="button"
+        onClick={() => flow.set({ step: "form", request: null, groupId: 0, groupRooms: [], groupKeys: [], mode: "request" })}
+      >
         New access request
       </Button>
     </div>
   );
 }
 
+type CapturedPhoto = { dataUrl: string; name: string; size: number; type: string };
+
 function ClockOutStep() {
   const flow = useWorkerFlow();
-  const [photos, setPhotos] = useState<Array<{ dataUrl: string; name: string; size: number; type: string }>>([]);
+  useEnsureGroupLoaded();
+  const rooms = useVisitRooms().filter((r) => !r.completedAt && !r.clockedOutAt);
+  const [photos, setPhotos] = useState<Record<number, CapturedPhoto[]>>({});
+  const [target, setTarget] = useState(0);
   const [photoType, setPhotoType] = useState(PHOTO_TYPES[0]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [session, refreshSession] = useWorkerSession();
+  const current = rooms.find((r) => r.accessRequestId === target) ?? rooms[0];
 
+  /** One sign-out covers every room; each room still gets its own photos for the Keyman. */
   async function finish() {
-    if (!flow.request) return;
+    if (!flow.request || !rooms.length) return;
     if (windowEnded(flow.request)) {
       const end = windowEnd(flow.request);
       setError(
@@ -1366,55 +1908,67 @@ function ClockOutStep() {
       );
       return;
     }
-    if (!photos.length) {
-      setError("Take a photo of the room before you sign out.");
+    const missing = rooms.filter((r) => !(photos[r.accessRequestId]?.length));
+    if (missing.length) {
+      setError(
+        rooms.length > 1
+          ? `Take a photo of every room before you sign out. Still needed: ${missing.map((r) => r.label).join(", ")}.`
+          : "Take a photo of the room before you sign out.",
+      );
+      if (missing[0]) setTarget(missing[0].accessRequestId);
       return;
     }
-    const workerId = flow.request.workerId || flow.worker?.id || 0;
     // Re-read rather than trusting the render-time value: the session can
     // lapse while this screen is open waiting for a photo.
-    const current = refreshSession();
-    if (!current) {
+    const fresh = refreshSession();
+    if (!fresh) {
       setError("");
       return;
     }
-    const freshToken = current.token?.trim() || "";
+    const freshToken = fresh.token?.trim() || "";
     setBusy(true);
     setError("");
     try {
-      for (const photo of photos) {
-        await api.insertPhoto(freshToken, {
-          accessRequestId: flow.request.id,
-          photoType,
-          uploadedByWorkerId: workerId,
-          dataUrl: photo.dataUrl,
-          fileName: photo.name,
-        });
-      }
       const now = localStamp();
-      await api.updateAccessRequest(freshToken, {
-        id: flow.request.id,
-        workerId,
-        roomId: flow.request.roomId,
-        status: "Completed",
-        reason: flow.request.reason,
-        workType: flow.request.workType,
-        description: flow.request.description,
-        clockedOutAt: now,
-        completedAt: now,
-      });
-      try {
-        await api.insertAudit(freshToken, {
-          accessRequestId: flow.request.id,
+      for (const room of rooms) {
+        const workerId = room.workerId || flow.worker?.id || 0;
+        for (const photo of photos[room.accessRequestId] ?? []) {
+          await api.insertPhoto(freshToken, {
+            accessRequestId: room.accessRequestId,
+            photoType,
+            uploadedByWorkerId: workerId,
+            dataUrl: photo.dataUrl,
+            fileName: photo.name,
+          });
+        }
+        await api.updateAccessRequest(freshToken, {
+          id: room.accessRequestId,
           workerId,
-          eventType: "ClockedOut",
-          description: `${flow.worker?.firstName ?? "Worker"} ${flow.worker?.lastName ?? ""} clocked out of ${locationDisplay(flow.room)}.`,
+          roomId: room.roomId,
+          status: "Completed",
+          reason: room.reason,
+          workType: room.workType,
+          description: room.description,
+          clockedOutAt: now,
+          completedAt: now,
         });
-      } catch {
-        /* audit is best-effort */
+        try {
+          await api.insertAudit(freshToken, {
+            accessRequestId: room.accessRequestId,
+            workerId,
+            eventType: "ClockedOut",
+            description: `${flow.worker?.firstName ?? "Worker"} ${flow.worker?.lastName ?? ""} clocked out of ${room.label}.`,
+          });
+        } catch {
+          /* audit is best-effort */
+        }
       }
+      const ids = new Set(rooms.map((r) => r.accessRequestId));
       flow.set({
         request: { ...flow.request, status: "Completed", clockedOutAt: now, completedAt: now },
+        groupRooms: flow.groupRooms.map((r) =>
+          ids.has(r.accessRequestId) ? { ...r, status: "Completed", clockedOutAt: now, completedAt: now } : r,
+        ),
         step: "done",
       });
     } catch (err) {
@@ -1428,14 +1982,26 @@ function ClockOutStep() {
     <div className="sg-form-grid">
       <h1>Sign out</h1>
       <p className="sg-muted">
-        Access is approved for {locationDisplay(flow.room)}. Take a live photo of the room, then sign
-        out. You cannot pick one from the gallery.
+        {rooms.length > 1
+          ? `Take a live photo of each of your ${rooms.length} rooms, then sign out once. You cannot pick one from the gallery.`
+          : `Access is approved for ${rooms[0]?.label || locationDisplay(flow.room)}. Take a live photo of the room, then sign out. You cannot pick one from the gallery.`}
       </p>
       {flow.request?.clockedInAt ? (
         <div className="sg-room-chip">
           <strong>Clocked in</strong>
           <small>{whenExact(flow.request.clockedInAt)}</small>
         </div>
+      ) : null}
+      {rooms.length > 1 ? (
+        <Field label="Photos for">
+          <Select value={current?.accessRequestId ?? 0} onChange={(e) => setTarget(Number(e.target.value))}>
+            {rooms.map((r) => (
+              <option key={r.accessRequestId} value={r.accessRequestId}>
+                {r.label} — {photos[r.accessRequestId]?.length ?? 0} photo(s)
+              </option>
+            ))}
+          </Select>
+        </Field>
       ) : null}
       <Field label="Photo type">
         <Select value={photoType} onChange={(e) => setPhotoType(e.target.value)}>
@@ -1445,7 +2011,7 @@ function ClockOutStep() {
         </Select>
       </Field>
       <div className="sg-photo-grid">
-        {photos.map((p, i) => (
+        {(current ? photos[current.accessRequestId] ?? [] : []).map((p, i) => (
           <div className="sg-photo" key={i}>
             <img src={p.dataUrl} alt={p.name} />
           </div>
@@ -1453,14 +2019,19 @@ function ClockOutStep() {
       </div>
       <CameraCapture
         onCapture={(photo) => {
-          setPhotos((prev) => [...prev, photo]);
+          if (!current) return;
+          setPhotos((prev) => ({
+            ...prev,
+            [current.accessRequestId]: [...(prev[current.accessRequestId] ?? []), photo],
+          }));
           setError("");
         }}
       />
+      <KeysPanel keys={flow.groupKeys} leaving />
       {error ? <p className="sg-error">{error}</p> : null}
       {session ? null : <VerifyAgainNotice action="sign out" />}
-      <Button variant="primary" block disabled={busy || !session} onClick={() => void finish()}>
-        {busy ? "Signing out…" : "Sign out"}
+      <Button variant="primary" block disabled={busy || !session || !rooms.length} onClick={() => void finish()}>
+        {busy ? "Signing out…" : rooms.length > 1 ? `Sign out of ${rooms.length} rooms` : "Sign out"}
       </Button>
       <Button type="button" onClick={() => flow.set({ step: "visit", mode: "visit" })}>
         Back
@@ -1481,6 +2052,7 @@ function DoneStep() {
         {prettyPhone(flow.phoneNumber)} · {locationDisplay(flow.room)}. Photos and times
         are stored for audit, and the Keyman has been asked to check the room.
       </p>
+      <KeysPanel keys={flow.groupKeys} leaving />
       <div className="sg-cta-row">
         <Button variant="primary" onClick={() => flow.reset()}>
           New scan
