@@ -988,7 +988,7 @@ function overlaps(aFrom: string | null | undefined, aTo: string | null | undefin
 function keyTaken(db: Db, keyId: number, from: string | null, to: string | null) {
   return (db.requestKeys ?? []).some((k) => {
     if (k.keyId !== keyId) return false;
-    if (k.status === "Issued") return true;
+    if (k.status === "Issued" || k.status === "Missing") return true;
     if (k.status !== "Requested" && k.status !== "Approved") return false;
     const r = db.requests.find((x) => x.id === k.accessRequestId);
     return overlaps(r?.workFrom, r?.workTo, from, to);
@@ -2527,7 +2527,7 @@ const handlers: Record<string, (body: Body) => unknown> = {
           (!accessRequestId || k.accessRequestId === accessRequestId) &&
           (!groupId || k.groupId === groupId) &&
           (!status || k.status === status) &&
-          (!outstanding || k.status === "Approved" || k.status === "Issued"),
+          (!outstanding || k.status === "Approved" || k.status === "Issued" || k.status === "Missing"),
       );
   },
   "/Access/updateaccessrequestkey": (body) => {

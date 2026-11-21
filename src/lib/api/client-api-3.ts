@@ -247,7 +247,7 @@ export const apiPart3 = {
       }),
     ),
 
-  /** Keys on requests. `outstanding` lists keys still to hand out or still out. */
+  /** Keys on requests. `outstanding` lists keys still to hand out, still out, or missing. */
   getAccessRequestKeys: async (
     token: string,
     filter: { id?: number; accessRequestId?: number; groupId?: number; status?: string; outstanding?: boolean },

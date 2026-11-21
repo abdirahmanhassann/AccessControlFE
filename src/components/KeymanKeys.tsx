@@ -169,6 +169,7 @@ export function KeymanKeys({
 
   const toHandOut = outstanding.filter((k) => /^approved$/i.test(String(k.status)));
   const out = outstanding.filter((k) => /^issued$/i.test(String(k.status)));
+  const missing = outstanding.filter((k) => /^missing$/i.test(String(k.status)));
   const late = out.filter(isLate);
   const roomsInArea = useMemo(
     () => data.rooms.filter((r) => String(r.workAreaId) === form.areaId),
@@ -214,6 +215,7 @@ export function KeymanKeys({
           <p className="sg-muted">
             {toHandOut.length} to hand out · {out.length} out
             {late.length ? ` · ${late.length} late` : ""}
+            {missing.length ? ` · ${missing.length} missing` : ""}
           </p>
         </div>
         <div className="sg-actions">
@@ -261,7 +263,13 @@ export function KeymanKeys({
                     </td>
                     <td>
                       <Badge tone={isLate(k) ? "danger" : keyTone(String(k.status))}>
-                        {isLate(k) ? "Late" : /^approved$/i.test(String(k.status)) ? "To hand out" : "Out"}
+                        {/^missing$/i.test(String(k.status))
+                          ? "Missing"
+                          : isLate(k)
+                            ? "Late"
+                            : /^approved$/i.test(String(k.status))
+                              ? "To hand out"
+                              : "Out"}
                       </Badge>
                       {k.issuedAt ? <div className="sg-help">since {when(k.issuedAt)}</div> : null}
                     </td>
