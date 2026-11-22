@@ -20,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import { BrandMark, Button } from "@/components/ui";
+import { StaffAlerts } from "@/components/StaffAlerts";
 import { clearSession, readSession } from "@/lib/session";
 import { useMounted } from "@/lib/use-mounted";
 import { API_BASE, USE_MOCK, api } from "@/lib/api/client";
@@ -75,6 +76,7 @@ export function ManagerShell({ children }: { children?: ReactNode }) {
   const [active, setActive] = useState<AccessRequest[]>([]);
   const [workers, setWorkers] = useState<Worker[]>([]);
   const [roomChecks, setRoomChecks] = useState(0);
+  const [unread, setUnread] = useState(0);
   // Bumped when a page changes something the sidebar counts (a room check decided).
   const [countsVersion, setCountsVersion] = useState(0);
 
@@ -167,6 +169,9 @@ export function ManagerShell({ children }: { children?: ReactNode }) {
                 {item.to === "/app/overdue" && overdue > 0 ? (
                   <span className="sg-nav-count">{overdue}</span>
                 ) : null}
+                {item.to === "/app/notifications" && unread > 0 ? (
+                  <span className="sg-nav-count" title="Unread">{unread}</span>
+                ) : null}
                 {item.to === "/app/keyman" && roomChecks > 0 ? (
                   <span className="sg-nav-count" title="Rooms waiting to be checked">{roomChecks}</span>
                 ) : null}
@@ -191,6 +196,7 @@ export function ManagerShell({ children }: { children?: ReactNode }) {
         </div>
       </aside>
       <div className="sg-main">
+        <StaffAlerts session={session} onUnread={setUnread} />
         <header className="sg-main-bar">
           <button className="sg-menu-btn" onClick={() => setOpen(true)} aria-label="Open menu">
             {open ? <X size={18} /> : <Menu size={18} />}

@@ -344,3 +344,131 @@ test("typed keys: a registered key is ticked, a new name is added to the registe
   await page.getByText("Gate key").first().waitFor();
   await page.getByText("Spare 7").first().waitFor();
 });
+
+test("late keys: the Keyman and worker are reminded once, and sign-out lists keys still out", async (t) => {
+  const page = await newPage(t);
+  await addKey(page, /13\.2/, "13.2-L");
+  await startRequest(page, "07700900608", ["Lou", "Late"], [[/^Riverside · Tower 1/, "13.2"]]);
+  await page.locator(".sg-key-option", { hasText: "13.2-L" }).locator("input").check();
+  await page.getByRole("button", { name: "Submit form" }).click();
+  await page.getByRole("heading", { name: "Waiting for approval" }).waitFor();
+  let db = await readDb(page);
+  const id = db.requests.find((r) => r.groupId === db.groups.at(-1).id).id;
+
+  await staffLogin(page, SITE_MANAGER);
+  await open(page, `/app/requests/${id}`);
+  await page.getByRole("button", { name: "Approve", exact: true }).click();
+  await page.locator("section.sg-card", { hasText: "Keys for this room" }).getByText("Approved").waitFor();
+
+  await staffLogin(page, KEYMAN);
+  await open(page, "/app/keyman");
+  const row = page.locator("section.sg-card").filter({ has: page.getByRole("button", { name: "Key register" }) }).locator("tbody tr", { hasText: "13.2-L" });
+  await row.getByRole("button", { name: "Hand over" }).click();
+  await row.getByRole("button", { name: "Returned" }).waitFor();
+
+  // Not late yet: no reminder.
+  await open(page, "/app/notifications");
+  await page.getByText("Keys to hand out to Lou Late", { exact: false }).first().waitFor();
+  db = await readDb(page);
+  assert.equal(db.notifications.filter((n) => n.type === "KeyLate").length, 0, "no reminder before the return-by time");
+
+  // The return-by time passes.
+  await page.evaluate(
+    ([key, accessRequestId]) => {
+      const d = JSON.parse(localStorage.getItem(key) ?? "{}");
+      const k = d.requestKeys.find((x) => x.accessRequestId === accessRequestId);
+      k.returnBy = new Date(Date.now() - 3600_000).toISOString();
+      localStorage.setItem(key, JSON.stringify(d));
+    },
+    [DB_KEY, id],
+  );
+  await open(page, "/app/notifications");
+  await page.getByText(/Key 13\.2-L for .*13\.2 not returned: Lou Late/).first().waitFor();
+
+  // Reading again does not repeat it.
+  await open(page, "/app/notifications");
+  await page.getByText(/Key 13\.2-L for .*not returned/).first().waitFor();
+  db = await readDb(page);
+  const late = db.notifications.filter((n) => n.type === "KeyLate" && n.accessRequestId === id);
+  assert.equal(late.filter((n) => n.channel === "SMS" && n.workerId).length, 1, "worker texted once");
+  assert.ok(late.some((n) => n.channel === "SMS" && /please return key 13\.2-L/.test(n.message)));
+  const keymanNotes = late.filter((n) => n.channel === "IN_APP");
+  assert.ok(keymanNotes.length >= 1);
+  assert.equal(new Set(keymanNotes.map((n) => n.userId)).size, keymanNotes.length, "each Keyman told once");
+  assert.ok(db.requestKeys.find((k) => k.accessRequestId === id).lateNotifiedAt, "reminder recorded");
+
+  // The worker signs out with the key still out: the Keyman's room-check message lists it.
+  await page.evaluate(() => localStorage.removeItem("sitegate.worker-flow"));
+  await workerVerify(page, "07700900608");
+  await page.getByRole("button", { name: "Clock in" }).click({ timeout: 20_000 });
+  const body = page.locator(".sg-worker-main");
+  await body.getByRole("button", { name: "Sign out", exact: true }).click();
+  const take = page.getByRole("button", { name: "Take photo" });
+  await take.waitFor();
+  await page.waitForFunction(() => {
+    const v = document.querySelector("video.sg-camera-video");
+    return !!v && v.videoWidth > 0;
+  });
+  await take.click();
+  await page.locator(".sg-photo img").first().waitFor();
+  await body.getByRole("button", { name: "Sign out", exact: true }).click();
+  await page.getByRole("heading", { name: "Visit closed" }).waitFor();
+  db = await readDb(page);
+  const review = db.notifications.find((n) => n.type === "RoomLeaveReview" && n.accessRequestId === id);
+  assert.ok(review, "Keyman pinged for the room check");
+  assert.match(review.message, /Keys still to collect: 13\.2-L\./);
+});
+
+test("live alerts: the Keyman gets a pop-up when a worker leaves a room, with an unread count on the Inbox", async (t) => {
+  const page = await newPage(t);
+  await staffLogin(page, KEYMAN);
+  await open(page, "/app/keyman");
+  const inbox = page.locator(".sg-nav-list a", { hasText: "Inbox" });
+  await inbox.waitFor();
+  // Nothing old pops up when the console is first opened.
+  await page.waitForTimeout(500);
+  assert.equal(await page.locator(".sg-alert-card").count(), 0, "no pop-up for alerts from before");
+
+  // A worker signs out (the server adds the Keyman's notification), then the console checks.
+  const keymanId = await page.evaluate(async () => {
+    const { api } = await import("/src/lib/api/client.ts");
+    const session = JSON.parse(localStorage.getItem("sitegate.session") ?? "null");
+    await api.insertNotification(session.token, {
+      userId: session.user.id,
+      type: "RoomLeaveReview",
+      channel: "IN_APP",
+      message: "Ali Alert has left Apartment 13.2. Check the room and approve or reject the room leave. Keys still to collect: 13.2-A.",
+    });
+    window.dispatchEvent(new Event("sitegate:alerts-check"));
+    return session.user.id;
+  });
+  const card = page.locator(".sg-alert-card", { hasText: "Room to check" });
+  await card.getByText("Ali Alert has left Apartment 13.2").waitFor();
+  await card.getByText("Keys still to collect: 13.2-A.", { exact: false }).waitFor();
+  const before = Number((await inbox.locator(".sg-nav-count").textContent()) ?? "0");
+  assert.ok(before >= 1, "Inbox shows unread alerts");
+
+  // Checking it again does not pop it up twice.
+  await page.evaluate(() => window.dispatchEvent(new Event("sitegate:alerts-check")));
+  await page.waitForTimeout(300);
+  assert.equal(await page.locator(".sg-alert-card").count(), 1);
+
+  // "Check room" opens the Keyman page and marks it read.
+  // It stays up across pages (and reloads) until dealt with.
+  await open(page, "/app/requests");
+  await card.getByText("Ali Alert has left Apartment 13.2").waitFor();
+  await card.getByRole("button", { name: "Check room" }).click();
+  await page.waitForURL(/\/app\/keyman/);
+  await card.waitFor({ state: "detached" });
+  const db = await readDb(page);
+  const note = db.notifications.find((n) => n.userId === keymanId && n.message.startsWith("Ali Alert"));
+  assert.ok(note.readAt, "marked read");
+  await page.waitForFunction(
+    (n) => {
+      const el = [...document.querySelectorAll(".sg-nav-list a")].find((a) => a.textContent?.includes("Inbox"));
+      const count = Number(el?.querySelector(".sg-nav-count")?.textContent ?? "0");
+      return count === n - 1;
+    },
+    before,
+  );
+});

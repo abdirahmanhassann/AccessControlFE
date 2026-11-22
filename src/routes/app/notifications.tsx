@@ -1,4 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { ALERTS_CHECK_EVENT } from "@/components/StaffAlerts";
 import { useEffect, useState } from "react";
 import { Badge, Button, PageSkeleton, toast } from "@/components/ui";
 import { readSession } from "@/lib/session";
@@ -48,6 +49,7 @@ function NotesPage() {
                       })
                       .then(() => {
                         toast("Marked read");
+                        window.dispatchEvent(new Event(ALERTS_CHECK_EVENT));
                         return reload();
                       });
                   }}

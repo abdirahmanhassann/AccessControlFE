@@ -68,6 +68,8 @@ type MockRequestKey = {
   issuedAt: string | null;
   returnedAt: string | null;
   note: string;
+  /** When the late-key reminder went out (once per key). */
+  lateNotifiedAt?: string | null;
 };
 
 function iso(msOffset = 0) {
@@ -663,6 +665,13 @@ function emptyDb(): Db {
 
 let memory: Db | null = null;
 
+// Another tab (e.g. a worker's phone in the demo) changed the data: read it again.
+if (typeof window !== "undefined") {
+  window.addEventListener("storage", (e) => {
+    if (e.key === KEY || e.key === null) memory = null;
+  });
+}
+
 function canUseStorage() {
   return typeof window !== "undefined" && typeof localStorage !== "undefined";
 }
@@ -942,7 +951,13 @@ function openRoomLeaveReview(req: AccessRequest) {
   });
   const room = db.rooms.find((r) => r.id === req.roomId);
   const worker = db.workers.find((w) => w.id === req.workerId);
-  const message = `${worker ? `${worker.firstName} ${worker.lastName}` : "A worker"} has left ${room ? locationDisplay(room) : "the room"}. Check the room and approve or reject the room leave.`;
+  const keysOut = (db.requestKeys ?? [])
+    .filter((k) => k.accessRequestId === req.id && (k.status === "Issued" || k.status === "Missing"))
+    .map((k) => {
+      const label = (db.keys ?? []).find((x) => x.id === k.keyId)?.label ?? `#${k.keyId}`;
+      return k.status === "Missing" ? `${label} (marked missing)` : label;
+    });
+  const message = `${worker ? `${worker.firstName} ${worker.lastName}` : "A worker"} has left ${room ? locationDisplay(room) : "the room"}. Check the room and approve or reject the room leave.${keysOut.length ? ` Keys still to collect: ${keysOut.join(", ")}.` : ""}`;
   audit({
     accessRequestId: req.id,
     workerId: req.workerId,
@@ -1183,6 +1198,48 @@ function notifyGroupDecided(db: Db, groupId: number) {
       });
     }
   }
+}
+
+/**
+ * Mirrors the API's background reminder: keys still out after their return-by time are
+ * reminded about once (Keymen in-app, worker by SMS). The demo runs it whenever
+ * notifications or key lists are read, instead of on a timer.
+ */
+function remindLateKeys() {
+  const db = load();
+  const now = Date.now();
+  const late = (db.requestKeys ?? []).filter(
+    (k) => k.status === "Issued" && k.returnBy && new Date(k.returnBy).getTime() < now && !k.lateNotifiedAt,
+  );
+  if (!late.length) return;
+  for (const k of late) k.lateNotifiedAt = iso();
+  const byVisit = new Map<number, MockRequestKey[]>();
+  for (const k of late) byVisit.set(k.accessRequestId, [...(byVisit.get(k.accessRequestId) ?? []), k]);
+  for (const [accessRequestId, keys] of byVisit) {
+    const rows = keys.map((k) => requestKeyRow(db, k));
+    const first = rows[0];
+    const room = first.roomName || first.roomNumber;
+    const labels = rows.map((r) => r.keyLabel).join(", ");
+    const one = rows.length === 1;
+    const due = first.returnBy
+      ? new Date(first.returnBy).toLocaleString("en-GB", { hour: "2-digit", minute: "2-digit", weekday: "short", day: "numeric", month: "short" })
+      : "earlier";
+    const who = `${first.workerFirstName} ${first.workerLastName}`.trim() + (first.companyName ? ` (${first.companyName})` : "");
+    const keymanMessage = `${one ? "Key" : "Keys"} ${labels} for ${room} not returned: ${who} was due to bring ${one ? "it" : "them"} back by ${due}.`;
+    audit({ accessRequestId, workerId: first.workerId, userId: null, eventType: "KeyLate", description: keymanMessage, metadata: "{}" });
+    for (const keyman of db.users.filter((u) => u.isActive && /^keyman$/i.test(String(u.role)))) {
+      notify({ userId: keyman.id, workerId: null, accessRequestId, type: "KeyLate", channel: "IN_APP", message: keymanMessage });
+    }
+    notify({
+      userId: null,
+      workerId: first.workerId,
+      accessRequestId,
+      type: "KeyLate",
+      channel: "SMS",
+      message: `SiteGate: please return ${one ? "key" : "keys"} ${labels} for ${room} to the Keyman. ${one ? "It was" : "They were"} due back by ${due}.`,
+    });
+  }
+  persist();
 }
 
 const handlers: Record<string, (body: Body) => unknown> = {
@@ -2261,6 +2318,7 @@ const handlers: Record<string, (body: Body) => unknown> = {
 
   "/Access/getnotifications": (body) => {
     const session = requireSession(body as { token?: string });
+    remindLateKeys();
     const db = load();
     if (session.kind === "worker") {
       return db.notifications.filter((n) => n.workerId === session.workerId);
@@ -2536,6 +2594,7 @@ const handlers: Record<string, (body: Body) => unknown> = {
   },
   "/Access/getaccessrequestkeys": (body) => {
     requireStaff(body as { token?: string });
+    remindLateKeys();
     const db = load();
     const id = Number(body.id ?? body.Id ?? 0);
     const accessRequestId = Number(body.accessRequestId ?? body.AccessRequestId ?? 0);
