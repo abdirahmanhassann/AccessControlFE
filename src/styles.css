@@ -1236,6 +1236,38 @@
   width: 18px;
   height: 18px;
 }
+.sg-key-add {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.sg-key-add input {
+  flex: 1;
+  min-width: 0;
+}
+.sg-key-typed-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.sg-key-typed {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid var(--line, #d0d5dd);
+  border-radius: 999px;
+  font-size: var(--text-sm);
+}
+.sg-key-typed button {
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 2px 6px;
+}
 .sg-row-inline {
   display: flex;
   gap: 8px;

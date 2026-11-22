@@ -19,3 +19,13 @@ export function onKeysChanged(reload: () => void) {
   window.addEventListener(KEYS_CHANGED_EVENT, reload);
   return () => window.removeEventListener(KEYS_CHANGED_EVENT, reload);
 }
+
+/** Two key names are the same key when they match ignoring capitals, spaces, hyphens and underscores (as the database does). */
+export function keyNameKey(label: string) {
+  return label.replace(/[\s_-]+/g, "").toUpperCase();
+}
+
+/** A typed key name tidied up: trimmed, inner spaces collapsed. */
+export function cleanKeyName(label: string) {
+  return label.trim().replace(/\s+/g, " ").slice(0, 100);
+}

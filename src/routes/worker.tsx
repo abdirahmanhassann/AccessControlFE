@@ -27,6 +27,7 @@ import { prettyPhone, whenExact } from "@/lib/format";
 import { localStamp, windowEnd, windowEnded } from "@/lib/visit-window";
 import { locationDisplay, matchEnteredRoom, parseEnteredRoom } from "@/lib/location";
 import { useMounted } from "@/lib/use-mounted";
+import { cleanKeyName, keyNameKey } from "@/lib/keys";
 
 const DEMO_SITES: Array<{ qr: string; name: string; note: string }> = [
 ];
@@ -611,6 +612,8 @@ type PendingRoom = {
   label: string;
   towerName: string;
   keyIds: number[];
+  /** Keys typed by the worker that are not in the register (yet). */
+  keyLabels: string[];
 };
 
 function toRoomInputs(list: PendingRoom[]): GroupRoomInput[] {
@@ -620,6 +623,7 @@ function toRoomInputs(list: PendingRoom[]): GroupRoomInput[] {
     roomText: r.roomText,
     locationKind: r.locationKind,
     keyIds: r.keyIds,
+    keyLabels: r.keyLabels,
   }));
 }
 
@@ -663,6 +667,7 @@ function FormStep() {
   const [openVisit, setOpenVisit] = useState<AccessRequest | null>(null);
   const [rooms, setRooms] = useState<PendingRoom[]>([]);
   const [roomKeys, setRoomKeys] = useState<Record<number, RoomKey[]>>({});
+  const [keyDrafts, setKeyDrafts] = useState<Record<string, string>>({});
   const [blackout, setBlackout] = useState<{ checks: RoomCheck[]; all: boolean } | null>(null);
   const siteId = Number(form.siteId) || flow.siteId || flow.room?.siteId || 0;
   const matchedRoom = matchEnteredRoom(locations, form.roomText);
@@ -875,6 +880,7 @@ function FormStep() {
       label: match ? locationDisplay(match) : roomText,
       towerName: selectedTower ? placeLabel(selectedTower, towers, sites) : "",
       keyIds: [],
+      keyLabels: [],
     };
   }
 
@@ -905,11 +911,52 @@ function FormStep() {
     );
   }
 
-  /** The rooms added, plus one still typed in the box but not added yet. */
+  /**
+   * A typed key: if the room already has a key by that name it is ticked instead;
+   * otherwise it is sent as a name and the server adds it to the key register.
+   * Returns false when the name was refused (shown as an error).
+   */
+  function addTypedKey(roomKey: string): boolean {
+    const room = rooms.find((r) => r.key === roomKey);
+    const name = cleanKeyName(keyDrafts[roomKey] ?? "");
+    if (!room || !name) return true;
+    const norm = keyNameKey(name);
+    const registered = room.roomId ? (roomKeys[room.roomId] ?? []).find((k) => keyNameKey(k.label) === norm) : undefined;
+    if (registered && !registered.available) {
+      setError(`Key ${registered.label} is already booked or out for that time. Choose another key or time.`);
+      return false;
+    }
+    setRooms((prev) =>
+      prev.map((r) => {
+        if (r.key !== roomKey) return r;
+        if (registered) return { ...r, keyIds: [...new Set([...r.keyIds, registered.id])] };
+        if (r.keyLabels.some((l) => keyNameKey(l) === norm)) return r;
+        return { ...r, keyLabels: [...r.keyLabels, name] };
+      }),
+    );
+    setKeyDrafts((prev) => ({ ...prev, [roomKey]: "" }));
+    setError("");
+    return true;
+  }
+
+  function removeTypedKey(roomKey: string, label: string) {
+    setRooms((prev) =>
+      prev.map((r) => (r.key === roomKey ? { ...r, keyLabels: r.keyLabels.filter((l) => l !== label) } : r)),
+    );
+  }
+
+  /** The rooms added, plus one still typed in the box but not added yet; key names still in a box count too. */
   function roomsToSend(): PendingRoom[] {
     const typed = currentRoomEntry();
-    if (typed && !rooms.some((r) => r.key === typed.key)) return [...rooms, typed];
-    return rooms;
+    const list = typed && !rooms.some((r) => r.key === typed.key) ? [...rooms, typed] : rooms;
+    return list.map((r) => {
+      const name = cleanKeyName(keyDrafts[r.key] ?? "");
+      if (!name) return r;
+      const norm = keyNameKey(name);
+      const registered = r.roomId ? (roomKeys[r.roomId] ?? []).find((k) => keyNameKey(k.label) === norm) : undefined;
+      if (registered) return { ...r, keyIds: [...new Set([...r.keyIds, registered.id])] };
+      return r.keyLabels.some((l) => keyNameKey(l) === norm) ? r : { ...r, keyLabels: [...r.keyLabels, name] };
+    });
   }
 
   async function submit(e: FormEvent) {
@@ -1324,10 +1371,38 @@ function FormStep() {
                     ))}
                   </div>
                 ) : (
-                  <small className="sg-muted">
-                    Keys: none registered for this room. The Keyman adds them under Keyman &gt; Keys.
-                  </small>
+                  <small className="sg-muted">No keys registered for this room yet.</small>
                 )}
+                {r.keyLabels.length ? (
+                  <div className="sg-key-typed-list">
+                    {r.keyLabels.map((label) => (
+                      <span className="sg-key-typed" key={label}>
+                        {label} <small>(new key)</small>
+                        <button type="button" aria-label={`Remove key ${label}`} onClick={() => removeTypedKey(r.key, label)}>
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+                <div className="sg-key-add">
+                  <Input
+                    aria-label={`Other key for ${r.label}`}
+                    placeholder={keys.length ? "Another key? Type its name" : "Need a key? Type its name, e.g. K-1.01-A"}
+                    value={keyDrafts[r.key] ?? ""}
+                    maxLength={100}
+                    onChange={(e) => setKeyDrafts((prev) => ({ ...prev, [r.key]: e.target.value }))}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addTypedKey(r.key);
+                      }
+                    }}
+                  />
+                  <Button type="button" onClick={() => addTypedKey(r.key)}>
+                    Add key
+                  </Button>
+                </div>
               </div>
             );
           })}

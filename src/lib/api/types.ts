@@ -341,6 +341,8 @@ export type GroupRoomInput = {
   roomText: string;
   locationKind?: string;
   keyIds?: number[];
+  /** Keys typed by the worker: matched to the room's register, or added to it. */
+  keyLabels?: string[];
 };
 
 export type GroupSubmitResult = {

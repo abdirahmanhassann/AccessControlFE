@@ -23,6 +23,7 @@ import {
   type Worker,
 } from "./types";
 import { locationDisplay, matchEnteredRoom, parseEnteredRoom } from "@/lib/location";
+import { keyNameKey } from "@/lib/keys";
 
 const KEY = "sitegate.db.v7";
 
@@ -1111,7 +1112,7 @@ function blackoutMessage(db: Db, workAreaId: number) {
   return `Access requests are closed for this area on ${day}s between ${hit.start} and ${hit.end}. Please try again after ${hit.end}.`;
 }
 
-type RoomInput = { roomId?: number; workAreaId?: number; roomText?: string; keyIds?: number[] };
+type RoomInput = { roomId?: number; workAreaId?: number; roomText?: string; keyIds?: number[]; keyLabels?: string[] };
 
 function roomInputs(body: Body): RoomInput[] {
   const raw = (body.rooms ?? body.Rooms ?? []) as Array<Record<string, unknown>>;
@@ -1120,6 +1121,9 @@ function roomInputs(body: Body): RoomInput[] {
     workAreaId: Number(r.workAreaId ?? r.WorkAreaId ?? 0),
     roomText: String(r.roomText ?? r.RoomText ?? "").trim(),
     keyIds: ((r.keyIds ?? r.KeyIds ?? []) as unknown[]).map(Number).filter((n) => n > 0),
+    keyLabels: ((r.keyLabels ?? r.KeyLabels ?? []) as unknown[])
+      .map((k) => String(k ?? "").trim().replace(/\s+/g, " "))
+      .filter(Boolean),
   }));
 }
 
@@ -2349,7 +2353,7 @@ const handlers: Record<string, (body: Body) => unknown> = {
     const departmentId = Number(body.departmentId ?? body.DepartmentId ?? 0);
     const workFrom = String(body.workFrom ?? body.WorkFrom ?? "") || null;
     const workTo = String(body.workTo ?? body.WorkTo ?? "") || null;
-    const accepted: Array<{ room: Room; keyIds: number[] }> = [];
+    const accepted: Array<{ room: Room; keyIds: number[]; keyLabels: string[] }> = [];
     const skipped: Array<{ roomId: number; label: string; message: string; windows: unknown[] }> = [];
     for (const input of inputs) {
       const room = findOrCreateRoom(input.workAreaId ?? 0, input.roomText ?? "", input.roomId ?? 0);
@@ -2360,7 +2364,7 @@ const handlers: Record<string, (body: Body) => unknown> = {
         skipped.push({ roomId: room.id, label: locationDisplay(room), message, windows: windowsToday(load(), room.workAreaId) });
         continue;
       }
-      accepted.push({ room, keyIds: input.keyIds ?? [] });
+      accepted.push({ room, keyIds: [...(input.keyIds ?? [])], keyLabels: input.keyLabels ?? [] });
     }
     if (!accepted.length) {
       throw new ApiError(400, `All of these rooms are in blackout hours right now, so nothing was sent. ${skipped.map((s) => `${s.label}: ${s.message}`).join(" ")}`);
@@ -2369,6 +2373,25 @@ const handlers: Record<string, (body: Body) => unknown> = {
     db.keys ??= [];
     db.requestKeys ??= [];
     db.groups ??= [];
+    // Typed keys: use the room's key with that name, bring a retired one back, or register it.
+    for (const a of accepted) {
+      const seen = new Set<string>();
+      for (const label of a.keyLabels) {
+        const norm = keyNameKey(label);
+        if (!norm || seen.has(norm)) continue;
+        seen.add(norm);
+        const matches = db.keys
+          .filter((k) => k.roomId === a.room.id && keyNameKey(k.label) === norm)
+          .sort((x, y) => Number(y.isActive) - Number(x.isActive) || x.id - y.id);
+        let key = matches[0];
+        if (key) key.isActive = true;
+        else {
+          key = { id: nextId(db, "keys"), roomId: a.room.id, label: label.slice(0, 100), tagNumber: "", notes: "Added from a worker request", isActive: true };
+          db.keys.push(key);
+        }
+        if (!a.keyIds.includes(key.id)) a.keyIds.push(key.id);
+      }
+    }
     for (const a of accepted) {
       for (const keyId of a.keyIds) {
         const key = db.keys.find((k) => k.id === keyId && k.roomId === a.room.id && k.isActive);

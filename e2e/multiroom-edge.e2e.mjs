@@ -295,3 +295,52 @@ test("a key recorded missing can be returned later, and only from the right stat
   db = await readDb(page);
   assert.equal(db.requestKeys.find((k) => k.accessRequestId === id).status, "Returned");
 });
+
+test("typed keys: a registered key is ticked, a new name is added to the register once", async (t) => {
+  const page = await newPage(t);
+  await addKey(page, /13\.3/, "13.3-A");
+  await startRequest(page, "07700900607", ["Tia", "Typed"], [
+    [/^Riverside · Tower 1/, "13.3"],
+    [/^Riverside · Tower 1/, "13.9"],
+  ]);
+  const known = page.locator(".sg-room-chip", { hasText: "Apartment 13.3" });
+  const fresh = page.locator(".sg-room-chip", { hasText: "13.9" });
+  await known.locator(".sg-key-option", { hasText: "13.3-A" }).waitFor();
+
+  // Typing a registered key's name in another style ticks it instead of adding a new one.
+  await known.getByRole("textbox").fill("13.3 a");
+  await known.getByRole("textbox").press("Enter");
+  assert.equal(await known.locator(".sg-key-option", { hasText: "13.3-A" }).locator("input").isChecked(), true);
+  assert.equal(await known.locator(".sg-key-typed").count(), 0, "matched, not added");
+
+  // A room with no keys: the worker types one; the same name again is not duplicated.
+  await fresh.getByText("No keys registered for this room yet.").waitFor();
+  await fresh.getByRole("textbox").fill("  Gate   key ");
+  await fresh.getByRole("button", { name: "Add key" }).click();
+  await fresh.locator(".sg-key-typed", { hasText: "Gate key" }).waitFor();
+  await fresh.getByRole("textbox").fill("gate-key");
+  await fresh.getByRole("textbox").press("Enter");
+  assert.equal(await fresh.locator(".sg-key-typed").count(), 1, "same name not added twice");
+
+  // A name left in the box (not added) is still sent.
+  await fresh.getByRole("textbox").fill("Spare 7");
+  await page.getByRole("button", { name: "Submit request for 2 rooms" }).click();
+  await page.getByRole("heading", { name: "Waiting for approval" }).waitFor();
+
+  const db = await readDb(page);
+  const group = db.groups.at(-1);
+  const requests = db.requests.filter((r) => r.groupId === group.id);
+  const newRoom = db.rooms.find((r) => r.roomNumber === "13.9");
+  const added = db.keys.filter((k) => k.roomId === newRoom.id);
+  assert.deepEqual(added.map((k) => k.label).sort(), ["Gate key", "Spare 7"]);
+  assert.ok(added.every((k) => k.isActive && k.notes === "Added from a worker request"));
+  const booked = db.requestKeys.filter((rk) => requests.some((r) => r.id === rk.accessRequestId));
+  assert.equal(booked.length, 3, "13.3-A plus the two typed keys");
+  assert.equal(db.keys.filter((k) => k.label === "13.3-A").length, 1, "registered key not duplicated");
+
+  // The Keyman sees the typed keys like any other.
+  await staffLogin(page, KEYMAN);
+  await open(page, `/app/requests/${requests.find((r) => r.roomId === newRoom.id).id}`);
+  await page.getByText("Gate key").first().waitFor();
+  await page.getByText("Spare 7").first().waitFor();
+});

@@ -128,6 +128,7 @@ function roomBody(rooms: GroupRoomInput[]) {
       roomText: r.roomText,
       locationKind: r.locationKind ?? "",
       keyIds: (r.keyIds ?? []).filter((k) => k > 0),
+      keyLabels: (r.keyLabels ?? []).map((k) => k.trim()).filter(Boolean),
     }),
   );
 }
