@@ -1323,8 +1323,10 @@ function FormStep() {
                       </label>
                     ))}
                   </div>
-                ) : r.roomId ? null : (
-                  <small>New room: no keys are registered for it yet.</small>
+                ) : (
+                  <small className="sg-muted">
+                    Keys: none registered for this room. The Keyman adds them under Keyman &gt; Keys.
+                  </small>
                 )}
               </div>
             );
